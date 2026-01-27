@@ -24,6 +24,7 @@ from src.models.simulation import Simulation
 from src.models.account import Account
 from src.models.position import Position
 from src.models.trade import Trade
+from src.services.trading_service import TradingService
 
 
 class SimulationService:
@@ -129,6 +130,7 @@ class SimulationService:
 
         アクティブなシミュレーションのstatusを'stopped'に変更し、
         終了時刻を記録する。口座情報とトレード数も取得して返す。
+        終了時に保有中のポジションを全て自動的にクローズする。
 
         Returns:
             dict: 終了結果を含む辞書
@@ -144,6 +146,22 @@ class SimulationService:
             return {
                 "error": "No active simulation",
             }
+
+        # 全ての保有ポジションを自動的にクローズする（ステータス変更前）
+        trading_service = TradingService(self.db)
+        open_positions = (
+            self.db.query(Position)
+            .filter(Position.simulation_id == simulation.id)
+            .filter(Position.status == "open")
+            .all()
+        )
+
+        for position in open_positions:
+            try:
+                trading_service.close_position(str(position.id))
+            except Exception as e:
+                # ポジションクローズに失敗してもシミュレーション終了は継続
+                print(f"Failed to close position {position.id}: {e}")
 
         simulation.status = "stopped"
         simulation.end_time = datetime.utcnow()

@@ -143,8 +143,9 @@ function SimulationResultModal({ isOpen, onClose }: SimulationResultModalProps) 
             <div className="flex gap-2 mt-6">
               <button
                 onClick={handleExportCsv}
-                disabled={result.totalTrades === 0}
+                disabled={loading}
                 className="flex-1 py-2 bg-btn-secondary text-text-strong rounded hover:opacity-80 disabled:opacity-50"
+                title={result.totalTrades === 0 ? 'トレード履歴がありません' : 'トレード履歴をCSV形式でダウンロード'}
               >
                 CSV出力
               </button>

@@ -168,6 +168,8 @@ function MainPage() {
 
     if (confirm('シミュレーションを終了しますか？')) {
       await stopSimulation()
+      // ポジションクローズと結果集計の完了を待つ
+      await new Promise(resolve => setTimeout(resolve, 500))
       setIsResultOpen(true)
     }
   }

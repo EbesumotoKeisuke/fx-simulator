@@ -3,6 +3,49 @@ import { createChart, IChartApi, ISeriesApi, CandlestickData, Time, MouseEventPa
 import { marketDataApi, Candle } from '../services/api'
 
 /**
+ * ローソク足の境界を越えたかをチェックする関数
+ *
+ * @param timeframe タイムフレーム
+ * @param lastTime 前回の更新時刻
+ * @param currentTime 現在の時刻
+ * @returns 境界を越えた場合はtrue
+ */
+const shouldUpdateCandle = (
+  timeframe: 'D1' | 'H1' | 'M10',
+  lastTime: Date,
+  currentTime: Date
+): boolean => {
+  switch (timeframe) {
+    case 'M10': {
+      // 10分の境界を越えたかチェック
+      // 例: 9:05 → 9:10, 9:20 → 9:30
+      const lastM10 = Math.floor(lastTime.getTime() / (10 * 60 * 1000))
+      const currentM10 = Math.floor(currentTime.getTime() / (10 * 60 * 1000))
+      return currentM10 > lastM10
+    }
+    case 'H1': {
+      // 時間が変わったかチェック
+      // 例: 9時 → 10時
+      return (
+        lastTime.getFullYear() !== currentTime.getFullYear() ||
+        lastTime.getMonth() !== currentTime.getMonth() ||
+        lastTime.getDate() !== currentTime.getDate() ||
+        lastTime.getHours() !== currentTime.getHours()
+      )
+    }
+    case 'D1': {
+      // 日付が変わったかチェック
+      // 例: 1日 → 2日
+      return (
+        lastTime.getFullYear() !== currentTime.getFullYear() ||
+        lastTime.getMonth() !== currentTime.getMonth() ||
+        lastTime.getDate() !== currentTime.getDate()
+      )
+    }
+  }
+}
+
+/**
  * チャートパネルのプロパティ
  */
 interface ChartPanelProps {
@@ -45,6 +88,8 @@ function ChartPanel({ title, timeframe, currentTime }: ChartPanelProps) {
   const lastCandleTimeRef = useRef<string | number | null>(null)
   // 初回データ取得完了フラグ
   const initialDataLoadedRef = useRef(false)
+  // 最後にデータを更新したシミュレーション時刻（throttle用）
+  const lastUpdateTimeRef = useRef<Date | null>(null)
 
   /**
    * ローソク足データをチャート用にフォーマットする
@@ -116,6 +161,14 @@ function ChartPanel({ title, timeframe, currentTime }: ChartPanelProps) {
       return
     }
 
+    // Throttle: ローソク足の境界を越えたかをチェック
+    if (currentTime && lastUpdateTimeRef.current) {
+      if (!shouldUpdateCandle(timeframe, lastUpdateTimeRef.current, currentTime)) {
+        // まだ境界を越えていないのでスキップ
+        return
+      }
+    }
+
     try {
       let response
       if (currentTime) {
@@ -151,6 +204,11 @@ function ChartPanel({ title, timeframe, currentTime }: ChartPanelProps) {
           formattedData.forEach((candle) => {
             candleDataRef.current.set(candle.time as string | number, candle)
           })
+
+          // データ更新成功時に最終更新時刻を記録
+          if (currentTime) {
+            lastUpdateTimeRef.current = currentTime
+          }
 
           // 新しいローソク足が追加された場合、または初回読み込み時に最新位置へスクロール
           const isNewCandle = newLastTime !== prevLastTime
@@ -193,6 +251,7 @@ function ChartPanel({ title, timeframe, currentTime }: ChartPanelProps) {
     // チャート再作成時にrefsをリセット
     lastCandleTimeRef.current = null
     initialDataLoadedRef.current = false
+    lastUpdateTimeRef.current = null
 
     const chart = createChart(chartContainerRef.current, {
       layout: {

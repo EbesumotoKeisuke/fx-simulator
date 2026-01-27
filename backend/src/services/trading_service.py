@@ -72,6 +72,28 @@ class TradingService:
             .first()
         )
 
+    def _get_latest_simulation(self) -> Optional[Simulation]:
+        """
+        最新のシミュレーションを取得する（内部メソッド）
+
+        アクティブなシミュレーションを優先し、なければ停止済みを含む最新のシミュレーションを返す。
+        結果表示やトレード履歴取得で使用する。
+
+        Returns:
+            Optional[Simulation]: 最新のシミュレーション、存在しない場合はNone
+        """
+        # まずアクティブなシミュレーションを探す
+        active = self._get_active_simulation()
+        if active:
+            return active
+
+        # アクティブなシミュレーションがなければ、停止済みを含む最新のシミュレーションを返す
+        return (
+            self.db.query(Simulation)
+            .order_by(Simulation.created_at.desc())
+            .first()
+        )
+
     def _get_account(self, simulation_id) -> Optional[Account]:
         """
         シミュレーションに紐づく口座を取得する（内部メソッド）
@@ -383,6 +405,7 @@ class TradingService:
 
         残高、有効証拠金、含み損益、確定損益、初期資金を返す。
         有効証拠金は残高に含み損益を加算して計算する。
+        停止済みのシミュレーションも含めて最新のシミュレーションから取得する。
 
         Returns:
             dict: 口座情報を含む辞書
@@ -392,7 +415,7 @@ class TradingService:
                 - realized_pnl (float): 確定損益
                 - initial_balance (float): 初期資金
         """
-        simulation = self._get_active_simulation()
+        simulation = self._get_latest_simulation()
         if not simulation:
             return {
                 "balance": 0,
@@ -437,6 +460,7 @@ class TradingService:
 
         決済済みのトレード履歴をページネーション付きで取得する。
         決済時刻の降順でソートされる。
+        停止済みのシミュレーションも含めて最新のシミュレーションから取得する。
 
         Args:
             limit (int, optional): 取得件数上限。デフォルトは50
@@ -449,7 +473,7 @@ class TradingService:
                 - limit (int): 取得件数上限
                 - offset (int): 取得開始位置
         """
-        simulation = self._get_active_simulation()
+        simulation = self._get_latest_simulation()
         if not simulation:
             return {"trades": [], "total": 0}
 
