@@ -29,12 +29,14 @@ services:
       DEBUG: "true"
     ports:
       - "8000:8000"
+      - "5678:5678"  # debugpy用ポート
     volumes:
       - ./backend:/app
       - ./backend/data:/app/data
     depends_on:
       db:
         condition: service_healthy
+    tty: true
 
   frontend:
     build:
@@ -48,6 +50,9 @@ services:
       - /app/node_modules
     depends_on:
       - backend
+    tty: true
+    environment:
+      - CHOKIDAR_USEPOLLING=true
 
 volumes:
   postgres_data:

@@ -32,3 +32,6 @@ httpx==0.26.0
 
 # Development
 python-dotenv==1.0.0
+
+# Debugging
+debugpy==1.8.0
