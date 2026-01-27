@@ -35,6 +35,8 @@ function MainPage() {
   const timerRef = useRef<number | null>(null)
   // 現在時刻を保持するref（タイマーコールバック内で使用）
   const currentTimeRef = useRef<Date | null>(null)
+  // ステータスを保持するref（タイマーコールバック内で使用）
+  const statusRef = useRef<'idle' | 'created' | 'running' | 'paused' | 'stopped'>('idle')
 
   const {
     simulationId,
@@ -63,6 +65,11 @@ function MainPage() {
     currentTimeRef.current = currentTime
   }, [currentTime])
 
+  // statusが変わったらrefを更新
+  useEffect(() => {
+    statusRef.current = status
+  }, [status])
+
   /**
    * シミュレーション自動進行タイマー
    * 1x速度 = 10分足が1秒で1本更新（10分/秒）
@@ -85,6 +92,11 @@ function MainPage() {
     const intervalMs = BASE_INTERVAL_MS / speed  // 速度に応じてインターバルを調整
 
     timerRef.current = window.setInterval(async () => {
+      // タイマーコールバック実行時にstatusを再確認（一時停止対策）
+      if (statusRef.current !== 'running') {
+        return
+      }
+
       const current = currentTimeRef.current
       if (!current) return
 
