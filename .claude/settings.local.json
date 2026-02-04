@@ -5,7 +5,12 @@
       "Bash(docker ps:*)",
       "Bash(curl:*)",
       "Bash(chmod:*)",
-      "Bash(bash:*)"
+      "Bash(bash:*)",
+      "Bash(docker-compose restart:*)",
+      "Bash(npm run dev:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run build:*)",
+      "Bash(dir:*)"
     ]
   }
 }

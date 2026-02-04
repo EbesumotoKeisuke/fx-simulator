@@ -15,6 +15,14 @@ function SimulationResultModal({ isOpen, onClose }: SimulationResultModalProps) 
     totalTrades: 0,
     wins: 0,
     losses: 0,
+    maxProfit: 0,         // 最大利確幅
+    maxLoss: 0,           // 最大損失幅
+    avgProfit: 0,         // 平均利確幅
+    avgLoss: 0,           // 平均損切幅
+    maxProfitPips: 0,     // 最大利確幅（pips）
+    maxLossPips: 0,       // 最大損失幅（pips）
+    avgProfitPips: 0,     // 平均利確幅（pips）
+    avgLossPips: 0,       // 平均損切幅（pips）
   })
   const [loading, setLoading] = useState(false)
 
@@ -45,19 +53,66 @@ function SimulationResultModal({ isOpen, onClose }: SimulationResultModalProps) 
       let totalTrades = 0
       let wins = 0
       let losses = 0
+      let maxProfit = 0
+      let maxLoss = 0
+      let avgProfit = 0
+      let avgLoss = 0
+      let maxProfitPips = 0
+      let maxLossPips = 0
+      let avgProfitPips = 0
+      let avgLossPips = 0
 
       if (tradesRes.success && tradesRes.data) {
         const trades: Trade[] = tradesRes.data.trades
         totalTrades = trades.length
-        wins = trades.filter((t) => t.realized_pnl > 0).length
-        losses = trades.filter((t) => t.realized_pnl < 0).length
+
+        // 勝ちトレードと負けトレードを分類
+        const winTrades = trades.filter((t) => t.realized_pnl > 0)
+        const lossTrades = trades.filter((t) => t.realized_pnl < 0)
+
+        wins = winTrades.length
+        losses = lossTrades.length
+
+        // 最大利確幅を計算（勝ちトレードの中で最大の利益）
+        if (winTrades.length > 0) {
+          maxProfit = Math.max(...winTrades.map(t => t.realized_pnl))
+          // 最大利確のトレードを見つけてそのPips値を取得
+          const maxProfitTrade = winTrades.find(t => t.realized_pnl === maxProfit)
+          maxProfitPips = maxProfitTrade?.realized_pnl_pips || 0
+
+          // 平均利確幅を計算
+          const totalWinPnl = winTrades.reduce((sum, t) => sum + t.realized_pnl, 0)
+          avgProfit = totalWinPnl / winTrades.length
+          // 平均利確幅（pips）を計算
+          const totalWinPips = winTrades.reduce((sum, t) => sum + t.realized_pnl_pips, 0)
+          avgProfitPips = totalWinPips / winTrades.length
+
+        }
+
+        // 最大損失幅を計算（負けトレードの中で最大の損失、負の値）
+        if (lossTrades.length > 0) {
+          maxLoss = Math.min(...lossTrades.map(t => t.realized_pnl))
+          // 最大損失のトレードを見つけてそのPips値を取得
+          const maxLossTrade = lossTrades.find(t => t.realized_pnl === maxLoss)
+          maxLossPips = maxLossTrade?.realized_pnl_pips || 0
+
+          // 平均損切幅を計算
+          const totalLossPnl = lossTrades.reduce((sum, t) => sum + t.realized_pnl, 0)
+          avgLoss = totalLossPnl / lossTrades.length
+          // 平均損切幅（pips）を計算
+          const totalLossPips = lossTrades.reduce((sum, t) => sum + t.realized_pnl_pips, 0)
+          avgLossPips = totalLossPips / lossTrades.length
+
+        }
+      } else {
+        console.warn('[SimulationResult] No trades data or request failed')
       }
 
       const profitLossPercent = initialBalance > 0
         ? ((profitLoss / initialBalance) * 100)
         : 0
 
-      setResult({
+      const finalResult = {
         finalBalance,
         initialBalance,
         profitLoss,
@@ -65,9 +120,21 @@ function SimulationResultModal({ isOpen, onClose }: SimulationResultModalProps) 
         totalTrades,
         wins,
         losses,
-      })
+        maxProfit,
+        maxLoss,
+        avgProfit,
+        avgLoss,
+        maxProfitPips,
+        maxLossPips,
+        avgProfitPips,
+        avgLossPips,
+      }
+
+      // console.log('[SimulationResult] Final result:', finalResult)
+
+      setResult(finalResult)
     } catch (error) {
-      console.error('Failed to fetch results:', error)
+      console.error('[SimulationResult] Failed to fetch results:', error)
     } finally {
       setLoading(false)
     }
@@ -85,7 +152,7 @@ function SimulationResultModal({ isOpen, onClose }: SimulationResultModalProps) 
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-bg-card rounded-lg p-6 w-96">
+      <div className="bg-bg-card rounded-lg p-6 w-[480px] max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-bold text-text-strong">シミュレーション結果</h2>
           <button onClick={onClose} className="text-text-primary hover:text-text-strong">
@@ -97,14 +164,14 @@ function SimulationResultModal({ isOpen, onClose }: SimulationResultModalProps) 
           <div className="text-center text-text-primary py-8">読み込み中...</div>
         ) : (
           <>
-            <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              {/* Row 1: Initial Balance | Final Balance */}
               <div className="bg-bg-primary rounded p-3">
                 <div className="text-text-primary text-sm">初期資金</div>
                 <div className="text-xl font-bold text-text-strong">
                   ¥{result.initialBalance.toLocaleString()}
                 </div>
               </div>
-
               <div className="bg-bg-primary rounded p-3">
                 <div className="text-text-primary text-sm">最終残高</div>
                 <div className="text-xl font-bold text-text-strong">
@@ -112,7 +179,8 @@ function SimulationResultModal({ isOpen, onClose }: SimulationResultModalProps) 
                 </div>
               </div>
 
-              <div className="bg-bg-primary rounded p-3">
+              {/* Row 2: Realized P&L - Full width */}
+              <div className="col-span-2 bg-bg-primary rounded p-3">
                 <div className="text-text-primary text-sm">確定損益</div>
                 <div className={`text-xl font-bold ${result.profitLoss >= 0 ? 'text-buy' : 'text-sell'}`}>
                   {result.profitLoss >= 0 ? '+' : ''}¥{result.profitLoss.toLocaleString()}
@@ -122,11 +190,11 @@ function SimulationResultModal({ isOpen, onClose }: SimulationResultModalProps) 
                 </div>
               </div>
 
+              {/* Row 3: Trade Count | Win/Loss */}
               <div className="bg-bg-primary rounded p-3">
                 <div className="text-text-primary text-sm">トレード回数</div>
                 <div className="text-xl font-bold text-text-strong">{result.totalTrades} 回</div>
               </div>
-
               <div className="bg-bg-primary rounded p-3">
                 <div className="text-text-primary text-sm">勝敗</div>
                 <div className="text-xl font-bold text-text-strong">
@@ -138,9 +206,56 @@ function SimulationResultModal({ isOpen, onClose }: SimulationResultModalProps) 
                   </span>
                 </div>
               </div>
+
+              {/* Row 4-5: Max/Avg Profit & Loss - Conditional */}
+              {result.totalTrades > 0 && (
+                <>
+                  <div className="bg-bg-primary rounded p-3">
+                    <div className="text-text-primary text-sm">最大利確幅</div>
+                    <div className="text-lg font-bold text-buy">
+                      {result.maxProfit > 0 ? '+' : ''}¥{result.maxProfit.toLocaleString()}
+                      <span className="text-sm ml-1">
+                        ({result.maxProfitPips > 0 ? '+' : ''}{result.maxProfitPips.toFixed(1)} pips)
+                      </span>
+                    </div>
+                  </div>
+                  <div className="bg-bg-primary rounded p-3">
+                    <div className="text-text-primary text-sm">最大損失幅</div>
+                    <div className="text-lg font-bold text-sell">
+                      {result.maxLoss >= 0 ? '+' : ''}¥{result.maxLoss.toLocaleString()}
+                      <span className="text-sm ml-1">
+                        ({result.maxLossPips >= 0 ? '+' : ''}{result.maxLossPips.toFixed(1)} pips)
+                      </span>
+                    </div>
+                  </div>
+
+                  {result.wins > 0 && (
+                    <div className="bg-bg-primary rounded p-3">
+                      <div className="text-text-primary text-sm">平均利確幅</div>
+                      <div className="text-lg font-bold text-buy">
+                        +¥{Math.round(result.avgProfit).toLocaleString()}
+                        <span className="text-sm ml-1">
+                          (+{result.avgProfitPips.toFixed(1)} pips)
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  {result.losses > 0 && (
+                    <div className="bg-bg-primary rounded p-3">
+                      <div className="text-text-primary text-sm">平均損切幅</div>
+                      <div className="text-lg font-bold text-sell">
+                        ¥{Math.round(result.avgLoss).toLocaleString()}
+                        <span className="text-sm ml-1">
+                          ({result.avgLossPips.toFixed(1)} pips)
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
 
-            <div className="flex gap-2 mt-6">
+            <div className="grid grid-cols-2 gap-2 mt-6">
               <button
                 onClick={handleExportCsv}
                 disabled={loading}

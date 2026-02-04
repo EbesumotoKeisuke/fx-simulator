@@ -84,7 +84,7 @@ class SimulationService:
         Returns:
             dict: シミュレーション情報を含む辞書
                 - simulation_id (str): シミュレーションID
-                - status (str): 状態（'running'）
+                - status (str): 状態（'created'）
                 - current_time (str): 現在時刻（ISO形式）
                 - speed (float): 再生速度
                 - balance (float): 口座残高
@@ -100,7 +100,7 @@ class SimulationService:
             start_time=start_time,
             current_time=start_time,
             speed=Decimal(str(speed)),
-            status="running",
+            status="created",
         )
         self.db.add(simulation)
         self.db.flush()
@@ -222,13 +222,13 @@ class SimulationService:
 
     def resume(self) -> dict:
         """
-        一時停止中のシミュレーションを再開する
+        作成済みまたは一時停止中のシミュレーションを開始/再開する
 
-        一時停止中のシミュレーションのstatusを'running'に変更する。
-        一時停止中でない場合はエラーを返す。
+        'created'または'paused'状態のシミュレーションのstatusを'running'に変更する。
+        それ以外の状態の場合はエラーを返す。
 
         Returns:
-            dict: 再開結果を含む辞書
+            dict: 開始/再開結果を含む辞書
                 - simulation_id (str): シミュレーションID
                 - status (str): 状態（'running'）
                 - current_time (str): 現在時刻（ISO形式）
@@ -238,8 +238,8 @@ class SimulationService:
         if not simulation:
             return {"error": "No active simulation"}
 
-        if simulation.status != "paused":
-            return {"error": "Simulation is not paused"}
+        if simulation.status not in ["created", "paused"]:
+            return {"error": "Simulation must be in 'created' or 'paused' status"}
 
         simulation.status = "running"
         self.db.commit()

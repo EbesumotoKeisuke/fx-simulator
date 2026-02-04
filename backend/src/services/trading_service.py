@@ -26,8 +26,8 @@ from src.models.trade import Trade
 from src.services.market_data_service import MarketDataService
 
 
-# 1ロットあたりの通貨単位（10,000通貨）
-LOT_UNIT = 10000
+# 1ロットあたりの通貨単位（100,000通貨 = 1スタンダードロット）
+LOT_UNIT = 100000
 # pipsの単位（USD/JPYの場合は0.01円 = 1pips）
 PIPS_UNIT = 0.01
 
@@ -126,6 +126,52 @@ class TradingService:
             "M10", simulation.current_time
         )
 
+    def _calculate_required_margin(self, price: float, lot_size: float) -> float:
+        """
+        必要証拠金を計算する（内部メソッド）
+
+        Args:
+            price (float): 価格
+            lot_size (float): ロットサイズ
+
+        Returns:
+            float: 必要証拠金（円）
+        """
+        # 1ロット = 100,000通貨
+        # レバレッジ = 25倍（日本の最大レバレッジ）
+        # 必要証拠金 = (価格 × ロット数 × 100,000) / 25
+        CURRENCY_PER_LOT = 100000
+        LEVERAGE = 25
+        return (price * lot_size * CURRENCY_PER_LOT) / LEVERAGE
+
+    def _get_total_used_margin(self, simulation_id: str) -> float:
+        """
+        使用中の証拠金合計を計算する（内部メソッド）
+
+        Args:
+            simulation_id (str): シミュレーションID
+
+        Returns:
+            float: 使用証拠金合計（円）
+        """
+        # 保有中のポジションを取得
+        open_positions = (
+            self.db.query(Position)
+            .filter(Position.simulation_id == simulation_id)
+            .filter(Position.status == "open")
+            .all()
+        )
+
+        total_margin = 0.0
+        for pos in open_positions:
+            # 各ポジションの必要証拠金を計算
+            margin = self._calculate_required_margin(
+                float(pos.entry_price), float(pos.lot_size)
+            )
+            total_margin += margin
+
+        return total_margin
+
     def create_order(self, side: str, lot_size: float) -> dict:
         """
         成行注文を作成する
@@ -162,6 +208,20 @@ class TradingService:
         current_price = self._get_current_price(simulation)
         if not current_price:
             return {"error": "Could not get current price"}
+
+        # 証拠金チェック
+        # 新規ポジションの必要証拠金を計算
+        required_margin = self._calculate_required_margin(current_price, lot_size)
+
+        # 現在の使用証拠金を計算
+        used_margin = self._get_total_used_margin(simulation.id)
+
+        # 合計証拠金が口座残高を超えないかチェック
+        total_required_margin = used_margin + required_margin
+        if total_required_margin > float(account.balance):
+            return {
+                "error": f"証拠金不足: 必要証拠金 ¥{int(total_required_margin):,} > 残高 ¥{int(account.balance):,}"
+            }
 
         # 注文を作成
         order = Order(

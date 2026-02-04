@@ -1,6 +1,24 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { createChart, IChartApi, ISeriesApi, CandlestickData, Time, MouseEventParams } from 'lightweight-charts'
-import { marketDataApi, Candle } from '../services/api'
+import { marketDataApi, Candle, ordersApi, tradesApi } from '../services/api'
+
+/**
+ * ISO週番号を取得する関数
+ * @param date 対象日時
+ * @returns ISO週番号（年と週番号を組み合わせた数値）
+ */
+const getISOWeek = (date: Date): number => {
+  const target = new Date(date.valueOf())
+  const dayNr = (date.getDay() + 6) % 7
+  target.setDate(target.getDate() - dayNr + 3)
+  const firstThursday = target.valueOf()
+  target.setMonth(0, 1)
+  if (target.getDay() !== 4) {
+    target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7)
+  }
+  const weekNumber = 1 + Math.ceil((firstThursday - target.valueOf()) / 604800000)
+  return date.getFullYear() * 100 + weekNumber
+}
 
 /**
  * ローソク足の境界を越えたかをチェックする関数
@@ -11,7 +29,7 @@ import { marketDataApi, Candle } from '../services/api'
  * @returns 境界を越えた場合はtrue
  */
 const shouldUpdateCandle = (
-  timeframe: 'D1' | 'H1' | 'M10',
+  timeframe: 'W1' | 'D1' | 'H1' | 'M10',
   lastTime: Date,
   currentTime: Date
 ): boolean => {
@@ -42,6 +60,13 @@ const shouldUpdateCandle = (
         lastTime.getDate() !== currentTime.getDate()
       )
     }
+    case 'W1': {
+      // 週が変わったかチェック（ISO週番号を使用）
+      // 例: 2024年第1週 → 2024年第2週
+      const lastWeek = getISOWeek(lastTime)
+      const currentWeek = getISOWeek(currentTime)
+      return currentWeek > lastWeek
+    }
   }
 }
 
@@ -51,10 +76,22 @@ const shouldUpdateCandle = (
 interface ChartPanelProps {
   /** チャートのタイトル */
   title: string
-  /** 時間足（D1: 日足, H1: 1時間足, M10: 10分足） */
-  timeframe: 'D1' | 'H1' | 'M10'
+  /** 時間足（W1: 週足, D1: 日足, H1: 1時間足, M10: 10分足） */
+  timeframe: 'W1' | 'D1' | 'H1' | 'M10'
   /** 現在のシミュレーション時刻（この時刻より前のデータを表示） */
   currentTime?: Date
+  /** 同期されたクロスヘア位置（他のチャートから） - 時刻 */
+  syncedCrosshairTime?: number | string | null
+  /** 同期されたクロスヘア位置（他のチャートから） - 価格 */
+  syncedCrosshairPrice?: number | null
+  /** クロスヘア移動時のコールバック（時刻と価格を通知） */
+  onCrosshairMove?: (time: number | string | null, price: number | null) => void
+  /** アクティブなチャート（マウスオーバー中のチャート） */
+  activeChart?: string | null
+  /** アクティブチャート変更時のコールバック */
+  onActiveChange?: (chartId: string | null) => void
+  /** データ更新トリガー（注文や決済が行われたときに変更される） */
+  refreshTrigger?: number
 }
 
 /**
@@ -75,8 +112,22 @@ interface OhlcDisplay {
  * @param title - チャートタイトル
  * @param timeframe - 表示する時間足
  * @param currentTime - シミュレーション時刻
+ * @param syncedCrosshairTime - 同期されたクロスヘア位置
+ * @param onCrosshairMove - クロスヘア移動時のコールバック
+ * @param activeChart - アクティブなチャート
+ * @param onActiveChange - アクティブチャート変更時のコールバック
  */
-function ChartPanel({ title, timeframe, currentTime }: ChartPanelProps) {
+function ChartPanel({
+  title,
+  timeframe,
+  currentTime,
+  syncedCrosshairTime,
+  syncedCrosshairPrice,
+  onCrosshairMove,
+  activeChart,
+  onActiveChange,
+  refreshTrigger
+}: ChartPanelProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -90,6 +141,86 @@ function ChartPanel({ title, timeframe, currentTime }: ChartPanelProps) {
   const initialDataLoadedRef = useRef(false)
   // 最後にデータを更新したシミュレーション時刻（throttle用）
   const lastUpdateTimeRef = useRef<Date | null>(null)
+  // カスタムクロスヘアライン位置（他のチャートから同期）
+  const [crosshairPosition, setCrosshairPosition] = useState<{ x: number; y: number } | null>(null)
+
+  /**
+   * Convert a Date to fakeUTC timestamp (same logic as formatCandles)
+   * This uses local time components to create a UTC timestamp, ensuring
+   * that the chart displays the original JST time correctly.
+   *
+   * @param date - The date to convert
+   * @returns Unix timestamp in seconds
+   */
+  const convertToFakeUtcTimestamp = (date: Date): number => {
+    return Date.UTC(
+      date.getFullYear(),
+      date.getMonth(),
+      date.getDate(),
+      date.getHours(),
+      date.getMinutes(),
+      date.getSeconds()  // Include seconds to match candle data
+    ) / 1000
+  }
+
+  /**
+   * Round a date down to the nearest 10-minute boundary
+   * Preserves the date and hour, only modifies minutes and seconds
+   *
+   * Examples:
+   * - 09:05:23 → 09:00:00
+   * - 09:15:47 → 09:10:00
+   * - 09:28:12 → 09:20:00
+   *
+   * @param date - The date to round
+   * @returns New date rounded to 10-minute boundary
+   */
+  const roundTo10MinuteBoundary = (date: Date): Date => {
+    const rounded = new Date(date)
+    rounded.setMinutes(Math.floor(date.getMinutes() / 10) * 10, 0, 0)
+    return rounded
+  }
+
+  /**
+   * Find the nearest candle time within a tolerance window
+   * Used as fallback when exact timestamp match fails
+   *
+   * @param targetTime - The target fakeUTC timestamp
+   * @param candleMap - Map of candle times to data
+   * @param toleranceMinutes - Maximum time difference allowed (default: 5)
+   * @returns Nearest candle time or null if none within tolerance
+   */
+  /**
+   * 指定された時刻に最も近いローソク足の時刻を探す
+   *
+   * マーカー配置時に、注文/トレードの時刻と完全一致するローソク足がない場合に
+   * 許容範囲内で最も近いローソク足を探す
+   *
+   * @param targetTime - 探したい時刻（fakeUTCタイムスタンプ）
+   * @param candleMap - ローソク足データのMap
+   * @param toleranceMinutes - 許容する時間差（分）。デフォルト15分に拡大
+   * @returns 最も近いローソク足の時刻、または見つからない場合はnull
+   */
+  const findNearestCandleTime = (
+    targetTime: number,
+    candleMap: Map<string | number, CandlestickData>,
+    toleranceMinutes: number = 15  // 5分→15分に拡大（10分足の1.5本分）
+  ): number | null => {
+    let nearestTime: number | null = null
+    let minDiff = toleranceMinutes * 60  // Convert to seconds
+
+    for (const [time] of candleMap.entries()) {
+      if (typeof time === 'number') {
+        const diff = Math.abs(time - targetTime)
+        if (diff < minDiff) {
+          minDiff = diff
+          nearestTime = time
+        }
+      }
+    }
+
+    return nearestTime
+  }
 
   /**
    * ローソク足データをチャート用にフォーマットする
@@ -103,31 +234,12 @@ function ChartPanel({ title, timeframe, currentTime }: ChartPanelProps) {
     return candles.map((c) => {
       const date = new Date(c.timestamp)
 
-      // 日足の場合は日付文字列を使用
-      if (timeframe === 'D1') {
-        // ローカル時間（JST）の日付をそのまま使用
-        const year = date.getFullYear()
-        const month = String(date.getMonth() + 1).padStart(2, '0')
-        const day = String(date.getDate()).padStart(2, '0')
-        return {
-          time: `${year}-${month}-${day}` as Time,
-          open: c.open,
-          high: c.high,
-          low: c.low,
-          close: c.close,
-        }
-      }
-
-      // 時間足の場合：ローカル時間のコンポーネントからUTCタイムスタンプを作成
-      // これにより、チャート上で元のJST時刻が表示される
-      const fakeUtcTimestamp = Date.UTC(
-        date.getFullYear(),
-        date.getMonth(),
-        date.getDate(),
-        date.getHours(),
-        date.getMinutes(),
-        date.getSeconds()
-      ) / 1000
+      // 全てのタイムフレームで数値タイムスタンプを使用
+      // lightweight-chartsは文字列の場合yyyy-mm-dd形式のみサポートするため、
+      // 時刻情報を含めるには数値タイムスタンプを使用する必要がある
+      // ローカル時間の各コンポーネントを使ってUTCタイムスタンプを作成し、
+      // チャート上で元のJST時刻が表示されるようにする
+      const fakeUtcTimestamp = convertToFakeUtcTimestamp(date)
       return {
         time: fakeUtcTimestamp as Time,
         open: c.open,
@@ -148,7 +260,7 @@ function ChartPanel({ title, timeframe, currentTime }: ChartPanelProps) {
     const hour = String(date.getHours()).padStart(2, '0')
     const minute = String(date.getMinutes()).padStart(2, '0')
     const second = String(date.getSeconds()).padStart(2, '0')
-    return `${year}-${month}-${day}T${hour}:${minute}:${second}`
+    return `${year}-${month}-${day} ${hour}:${minute}:${second}`
   }
 
   /**
@@ -228,14 +340,16 @@ function ChartPanel({ title, timeframe, currentTime }: ChartPanelProps) {
                 // 表示範囲の右端がデータの末尾に近い場合のみスクロール
                 const dataLength = formattedData.length
                 const visibleRight = visibleRange.to
-                // 右端から5本以内にいる場合はスクロール
+                // 右端から5本以内にいる場合はスクロール（右に7本分の余白を作る）
                 if (dataLength - visibleRight < 5) {
-                  timeScale.scrollToPosition(0, false)
+                  timeScale.scrollToPosition(7, false)
                 }
               }
             } else {
-              // 初回読み込み完了
+              // 初回読み込み完了時：最新のローソク足の右側に7本分の余白を作る
               initialDataLoadedRef.current = true
+              const timeScale = chartRef.current.timeScale()
+              timeScale.scrollToPosition(7, false)
             }
           }
         }
@@ -243,8 +357,149 @@ function ChartPanel({ title, timeframe, currentTime }: ChartPanelProps) {
     } catch (error) {
       console.error('Failed to fetch candle data:', error)
     }
+
   }, [timeframe, currentTime])
 
+  /**
+   * トレードマーカーを更新する（内部使用）
+   *
+   * 注文/トレードの時刻を10分単位に丸め、ローソク足データと同じ
+   * タイムスタンプ変換ロジックを使用してマーカーを配置する
+   *
+   * マーカーの種類:
+   * - エントリーマーカー: 買い=緑↑「買」、売り=赤↓「売」
+   * - 決済マーカー: 青丸「決」
+   */
+  const updateMarkers = useCallback(async () => {
+    // 10分足以外、またはseriesが未設定の場合はスキップ
+    if (timeframe !== 'M10' || !seriesRef.current) return
+
+    // ローソク足データがない場合はスキップ（後で再試行される）
+    if (candleDataRef.current.size === 0) {
+      console.log('[ChartPanel] updateMarkers: No candle data available yet, skipping')
+      return
+    }
+
+    try {
+      const [ordersRes, tradesRes] = await Promise.all([
+        ordersApi.getAll(1000, 0),
+        tradesApi.getAll(1000, 0)
+      ])
+
+      const markers: any[] = []
+      let exactMatchCount = 0
+      let fallbackMatchCount = 0
+      let failedMatchCount = 0
+
+      // エントリーマーカー（注文データから）
+      if (ordersRes.success && ordersRes.data?.orders) {
+        ordersRes.data.orders.forEach((order) => {
+          const orderDate = new Date(order.executed_at)
+          const roundedDate = roundTo10MinuteBoundary(orderDate)
+          const markerTime = convertToFakeUtcTimestamp(roundedDate)
+
+          // 1. 完全一致を試す
+          let finalTime: number | null = null
+          if (candleDataRef.current.has(markerTime)) {
+            finalTime = markerTime
+            exactMatchCount++
+          } else {
+            // 2. フォールバック: 最も近いローソク足を探す
+            finalTime = findNearestCandleTime(markerTime, candleDataRef.current)
+            if (finalTime !== null) {
+              fallbackMatchCount++
+              console.log(
+                `[Marker Fallback] Order ${order.order_id}: ` +
+                `${order.executed_at} → rounded to ${roundedDate.toISOString()} → ` +
+                `target ${markerTime} → found nearest ${finalTime} ` +
+                `(diff: ${Math.abs(finalTime - markerTime)}s)`
+              )
+            } else {
+              failedMatchCount++
+              console.warn(
+                `[Marker Failed] Order ${order.order_id}: ` +
+                `${order.executed_at} → no matching candle found for ${markerTime}`
+              )
+            }
+          }
+
+          if (finalTime !== null) {
+            markers.push({
+              time: finalTime as Time,
+              position: order.side === 'buy' ? 'belowBar' : 'aboveBar',
+              color: order.side === 'buy' ? '#26a69a' : '#ef5350',
+              shape: order.side === 'buy' ? 'arrowUp' : 'arrowDown',
+              text: order.side === 'buy' ? '買' : '売'
+            })
+          }
+        })
+      }
+
+      // 決済マーカー（トレードデータから）
+      if (tradesRes.success && tradesRes.data?.trades) {
+        tradesRes.data.trades.forEach((trade) => {
+          const tradeDate = new Date(trade.closed_at)
+          const roundedDate = roundTo10MinuteBoundary(tradeDate)
+          const markerTime = convertToFakeUtcTimestamp(roundedDate)
+
+          // 1. 完全一致を試す
+          let finalTime: number | null = null
+          if (candleDataRef.current.has(markerTime)) {
+            finalTime = markerTime
+            exactMatchCount++
+          } else {
+            // 2. フォールバック: 最も近いローソク足を探す
+            finalTime = findNearestCandleTime(markerTime, candleDataRef.current)
+            if (finalTime !== null) {
+              fallbackMatchCount++
+              console.log(
+                `[Marker Fallback] Trade ${trade.trade_id}: ` +
+                `${trade.closed_at} → rounded to ${roundedDate.toISOString()} → ` +
+                `target ${markerTime} → found nearest ${finalTime} ` +
+                `(diff: ${Math.abs(finalTime - markerTime)}s)`
+              )
+            } else {
+              failedMatchCount++
+              console.warn(
+                `[Marker Failed] Trade ${trade.trade_id}: ` +
+                `${trade.closed_at} → no matching candle found for ${markerTime}`
+              )
+            }
+          }
+
+          if (finalTime !== null) {
+            markers.push({
+              time: finalTime as Time,
+              position: trade.side === 'buy' ? 'aboveBar' : 'belowBar',
+              color: '#2196f3',
+              shape: 'circle',
+              text: '決'
+            })
+          }
+        })
+      }
+
+      // マーカーを時刻順にソート
+      markers.sort((a, b) => (a.time as number) - (b.time as number))
+
+      // デバッグログ出力
+      console.log('[ChartPanel] Marker Summary:', {
+        total: markers.length,
+        exactMatches: exactMatchCount,
+        fallbackMatches: fallbackMatchCount,
+        failed: failedMatchCount,
+        candlesAvailable: candleDataRef.current.size
+      })
+
+      seriesRef.current.setMarkers(markers)
+    } catch (error) {
+      console.error('[ChartPanel] Failed to update markers:', error)
+    }
+  }, [timeframe])
+
+  /**
+   * チャート表示時の初期実行処理
+   */
   useEffect(() => {
     if (!chartContainerRef.current) return
 
@@ -257,6 +512,7 @@ function ChartPanel({ title, timeframe, currentTime }: ChartPanelProps) {
       layout: {
         background: { color: '#16213e' },
         textColor: '#e6e6e6',
+        fontSize: 14,
       },
       grid: {
         vertLines: { color: '#2d4263' },
@@ -264,18 +520,44 @@ function ChartPanel({ title, timeframe, currentTime }: ChartPanelProps) {
       },
       width: chartContainerRef.current.clientWidth,
       height: chartContainerRef.current.clientHeight,
+      localization: {
+        // 時刻表示を yyyy/mm/dd HH:mm 形式にカスタマイズ
+        timeFormatter: (timestamp: number) => {
+          const date = new Date(timestamp * 1000)
+          const year = date.getUTCFullYear()
+          const month = String(date.getUTCMonth() + 1).padStart(2, '0')
+          const day = String(date.getUTCDate()).padStart(2, '0')
+          const hour = String(date.getUTCHours()).padStart(2, '0')
+          const minute = String(date.getUTCMinutes()).padStart(2, '0')
+          return `${year}/${month}/${day} ${hour}:${minute}`
+        },
+      },
       timeScale: {
-        timeVisible: timeframe !== 'D1',
+        timeVisible: true, // すべてのタイムフレームで時刻を表示
         secondsVisible: false,
       },
       rightPriceScale: {
         borderColor: '#2d4263',
       },
       crosshair: {
-        mode: 1,
+        mode: 0, // 0 = Normal mode (カーソル位置に十字を表示)
+        vertLine: {
+          labelVisible: true,
+        },
+        horzLine: {
+          labelVisible: true,
+        },
+      },
+      watermark: {
+        visible: false,
+        color: 'rgba(0, 0, 0, 0)',
+        text: '',
       },
     })
 
+    /**
+     * チャート画面で表示するカラーコード一覧
+     */
     const candlestickSeries = chart.addCandlestickSeries({
       upColor: '#26a69a',
       downColor: '#ef5350',
@@ -299,6 +581,33 @@ function ChartPanel({ title, timeframe, currentTime }: ChartPanelProps) {
      * getUTC*メソッドで取得するとJST時刻が得られる
      */
     const handleCrosshairMove = (param: MouseEventParams) => {
+      // 他のチャートにクロスヘア位置を通知（時刻と価格の両方）
+      if (onCrosshairMove) {
+        // マウス位置の実際の価格を取得
+        let price: number | null = null
+        // ローソク足データから価格を取得（close価格を使用）
+        if (param.seriesData && param.seriesData.has(candlestickSeries)) {
+          const data = param.seriesData.get(candlestickSeries) as CandlestickData | undefined
+          if (data) {
+            price = data.close
+          }
+        }
+
+        // Time型をstring | number | nullに変換
+        let time: string | number | null = null
+        if (param.time !== undefined && param.time !== null) {
+          if (typeof param.time === 'string' || typeof param.time === 'number') {
+            time = param.time
+          } else {
+            // BusinessDay型の場合は文字列に変換
+            const bd = param.time as { year: number; month: number; day: number }
+            time = `${bd.year}-${String(bd.month).padStart(2, '0')}-${String(bd.day).padStart(2, '0')}`
+          }
+        }
+
+        onCrosshairMove(time, price)
+      }
+
       if (!param.time || !param.seriesData) {
         setOhlcData(null)
         return
@@ -308,16 +617,21 @@ function ChartPanel({ title, timeframe, currentTime }: ChartPanelProps) {
       if (data) {
         let timeStr: string
         if (typeof param.time === 'string') {
-          // 日足の場合：日付文字列をそのまま使用
-          timeStr = param.time
+          // 文字列形式の場合（万が一のフォールバック）
+          const parts = param.time.split(' ')
+          const dateParts = parts[0].split('-')
+          const timePart = parts.length > 1 ? parts[1] : '00:00'
+          timeStr = `${dateParts[0]}/${dateParts[1]}/${dateParts[2]} ${timePart}`
         } else {
-          // 時間足の場合：疑似UTCタイムスタンプからJST時刻を表示
+          // 数値タイムスタンプの場合：疑似UTCタイムスタンプからJST時刻を表示
+          // yyyy/mm/dd HH:MM 形式で表示
           const date = new Date((param.time as number) * 1000)
+          const year = date.getUTCFullYear()
           const month = String(date.getUTCMonth() + 1).padStart(2, '0')
           const day = String(date.getUTCDate()).padStart(2, '0')
           const hour = String(date.getUTCHours()).padStart(2, '0')
           const minute = String(date.getUTCMinutes()).padStart(2, '0')
-          timeStr = `${month}/${day} ${hour}:${minute}`
+          timeStr = `${year}/${month}/${day} ${hour}:${minute}`
         }
         setOhlcData({
           time: timeStr,
@@ -352,8 +666,139 @@ function ChartPanel({ title, timeframe, currentTime }: ChartPanelProps) {
 
   // データ取得
   useEffect(() => {
-    fetchData()
-  }, [fetchData])
+    const loadData = async () => {
+      await fetchData()
+      // データ取得後、10分足の場合はマーカーも更新
+      if (timeframe === 'M10') {
+        await updateMarkers()
+      }
+    }
+    loadData()
+  }, [fetchData, timeframe, updateMarkers])
+
+  // トレードマーカーの取得と表示（10分足のみ）- refreshTrigger変更時
+  useEffect(() => {
+    if (timeframe === 'M10' && refreshTrigger !== undefined) {
+      updateMarkers()
+    }
+  }, [timeframe, updateMarkers, refreshTrigger])
+
+  // 他のチャートからのクロスヘア同期
+  useEffect(() => {
+    // このチャートがアクティブな場合は同期しない（自分のクロスヘアを表示）
+    if (activeChart === timeframe || !syncedCrosshairTime || !chartRef.current || !seriesRef.current) {
+      setCrosshairPosition(null)
+      return
+    }
+
+    // ローソク足データがない場合は何もしない
+    if (candleDataRef.current.size === 0) {
+      setCrosshairPosition(null)
+      return
+    }
+
+    // syncedCrosshairTimeに対応するローソク足を探す
+    // すべてのタイムフレームが数値タイムスタンプを使用する
+    let candleData: CandlestickData | undefined
+    let candleTime: Time | undefined
+
+    if (typeof syncedCrosshairTime === 'number') {
+      // 数値タイムスタンプの場合
+      // 完全一致を試す
+      candleData = candleDataRef.current.get(syncedCrosshairTime)
+      candleTime = syncedCrosshairTime as Time
+
+      // 完全一致しない場合、最も近い時刻のデータを探す（許容範囲なし）
+      if (!candleData) {
+        let closestTime: number | null = null
+        let minDiff = Infinity
+        for (const [time] of candleDataRef.current.entries()) {
+          if (typeof time === 'number') {
+            const diff = Math.abs(time - syncedCrosshairTime)
+            if (diff < minDiff) {
+              minDiff = diff
+              closestTime = time
+            }
+          }
+        }
+        if (closestTime !== null) {
+          candleData = candleDataRef.current.get(closestTime)
+          candleTime = closestTime as Time
+        }
+      }
+    } else if (typeof syncedCrosshairTime === 'string') {
+      // 文字列形式の場合（後方互換性のため残す）
+      candleData = candleDataRef.current.get(syncedCrosshairTime)
+      candleTime = syncedCrosshairTime as Time
+    }
+
+    if (candleData && candleTime !== undefined) {
+      // OHLC表示を更新
+      let timeStr: string
+      if (typeof candleTime === 'string') {
+        // 文字列形式の場合（万が一のフォールバック）
+        const parts = candleTime.split(' ')
+        const dateParts = parts[0].split('-')
+        const timePart = parts.length > 1 ? parts[1] : '00:00'
+        timeStr = `${dateParts[0]}/${dateParts[1]}/${dateParts[2]} ${timePart}`
+      } else if (typeof candleTime === 'number') {
+        // 数値タイムスタンプの場合：yyyy/mm/dd HH:MM 形式で表示
+        const date = new Date(candleTime * 1000)
+        const year = date.getUTCFullYear()
+        const month = String(date.getUTCMonth() + 1).padStart(2, '0')
+        const day = String(date.getUTCDate()).padStart(2, '0')
+        const hour = String(date.getUTCHours()).padStart(2, '0')
+        const minute = String(date.getUTCMinutes()).padStart(2, '0')
+        timeStr = `${year}/${month}/${day} ${hour}:${minute}`
+      } else {
+        // BusinessDay型の場合
+        const bd = candleTime as { year: number; month: number; day: number }
+        timeStr = `${bd.year}/${String(bd.month).padStart(2, '0')}/${String(bd.day).padStart(2, '0')} 00:00`
+      }
+
+      setOhlcData({
+        time: timeStr,
+        open: candleData.open,
+        high: candleData.high,
+        low: candleData.low,
+        close: candleData.close,
+      })
+
+      // クロスヘアラインの位置を計算
+      try {
+        const timeScale = chartRef.current.timeScale()
+
+        const x = timeScale.timeToCoordinate(candleTime)
+        // 同期された価格から座標を計算
+        // syncedCrosshairPriceがある場合はそれを使用、ない場合はclose価格を使用
+        const priceToUse = syncedCrosshairPrice !== null && syncedCrosshairPrice !== undefined
+          ? syncedCrosshairPrice
+          : candleData.close
+        const y = seriesRef.current.priceToCoordinate(priceToUse)
+
+        if (x !== null && y !== null) {
+          setCrosshairPosition({ x, y })
+        } else {
+          // 座標が取得できない場合（画面外など）でもOHLC表示は維持
+          // 縦線のみ表示できる場合もある
+          if (x !== null) {
+            // 縦線は表示可能、横線は中央に
+            const chartHeight = chartContainerRef.current?.clientHeight || 200
+            setCrosshairPosition({ x, y: chartHeight / 2 })
+          } else {
+            setCrosshairPosition(null)
+          }
+        }
+      } catch (error) {
+        console.error('Failed to calculate crosshair position:', error)
+        setCrosshairPosition(null)
+      }
+    } else {
+      // ローソク足データが見つからない場合
+      setOhlcData(null)
+      setCrosshairPosition(null)
+    }
+  }, [syncedCrosshairTime, syncedCrosshairPrice, activeChart, timeframe])
 
   // 最新のローソク足にスクロール
   const scrollToLatest = () => {
@@ -364,33 +809,73 @@ function ChartPanel({ title, timeframe, currentTime }: ChartPanelProps) {
 
   return (
     <div className="bg-bg-card rounded-lg overflow-hidden flex flex-col">
-      <div className="px-3 py-1 text-sm font-semibold text-text-strong border-b border-border flex justify-between items-center">
+      <div className="px-3 py-1.5 text-base font-semibold text-text-strong border-b border-border flex justify-between items-center">
         <span>{title}</span>
         {/* クロスヘアホバー時のOHLC表示 */}
         {ohlcData && (
-          <div className="flex items-center gap-2 text-xs font-normal">
-            <span className="text-text-secondary">{ohlcData.time}</span>
+          <div className="flex items-center gap-2 text-base font-normal">
+            <span className="text-text-secondary text-sm">{ohlcData.time}</span>
             <span className="text-text-primary">O:</span>
-            <span className="text-text-strong">{ohlcData.open.toFixed(3)}</span>
+            <span className="text-text-strong font-semibold">{ohlcData.open.toFixed(3)}</span>
             <span className="text-text-primary">H:</span>
-            <span className="text-buy">{ohlcData.high.toFixed(3)}</span>
+            <span className="text-buy font-semibold">{ohlcData.high.toFixed(3)}</span>
             <span className="text-text-primary">L:</span>
-            <span className="text-sell">{ohlcData.low.toFixed(3)}</span>
+            <span className="text-sell font-semibold">{ohlcData.low.toFixed(3)}</span>
             <span className="text-text-primary">C:</span>
-            <span className={ohlcData.close >= ohlcData.open ? 'text-buy' : 'text-sell'}>
+            <span className={`font-semibold ${ohlcData.close >= ohlcData.open ? 'text-buy' : 'text-sell'}`}>
               {ohlcData.close.toFixed(3)}
             </span>
           </div>
         )}
         <button
           onClick={scrollToLatest}
-          className="text-xs text-text-primary hover:text-text-strong"
+          className="text-sm text-text-primary hover:text-text-strong"
           title="最新へ移動"
         >
           →|
         </button>
       </div>
-      <div ref={chartContainerRef} className="flex-1 min-h-0" />
+      <div
+        ref={chartContainerRef}
+        className="flex-1 min-h-0 relative"
+        onMouseEnter={() => onActiveChange?.(timeframe)}
+        onMouseLeave={() => onActiveChange?.(null)}
+      >
+        {crosshairPosition && activeChart !== timeframe && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              pointerEvents: 'none',
+              zIndex: 10,
+            }}
+          >
+            <div
+              style={{
+                position: 'absolute',
+                left: crosshairPosition.x,
+                top: 0,
+                width: 1,
+                height: '100%',
+                borderLeft: '1px dotted rgba(230, 230, 230, 0.5)',
+              }}
+            />
+            <div
+              style={{
+                position: 'absolute',
+                top: crosshairPosition.y,
+                left: 0,
+                width: '100%',
+                height: 1,
+                borderTop: '1px dotted rgba(230, 230, 230, 0.5)',
+              }}
+            />
+          </div>
+        )}
+      </div>
     </div>
   )
 }

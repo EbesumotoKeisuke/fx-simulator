@@ -6,7 +6,7 @@ FXトレードのシミュレーションツール。過去の為替データを
 
 ### ✅ 実装済み機能（MVP）
 
-- **マルチタイムフレームチャート表示** - 日足・1時間足・10分足を同時表示、最新時刻は同期
+- **マルチタイムフレームチャート表示** - 週足・日足・1時間足・10分足を同時表示、最新時刻は同期
 - **過去データ再生** - 時系列で過去データを再生、速度調整可能（1x, 5x, 10x）
 - **一時停止・再開** - シミュレーション中いつでも一時停止・再開が可能
 - **成行注文** - 買い・売りの即座な注文発注
@@ -71,6 +71,7 @@ docker-compose up -d
 `backend/data/` フォルダに以下のCSVファイルを配置してください。
 
 **必要なファイル:**
+- `fx_data_USDJPY_weekly_technical_indicator.csv` (週足)
 - `fx_data_USDJPY_technical_indicator.csv` (日足)
 - `fx_data_USDJPY_1hour_technical_indicator.csv` (1時間足)
 - `fx_data_USDJPY_10minutes_technical_indicator.csv` (10分足)

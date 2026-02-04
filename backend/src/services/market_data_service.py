@@ -54,7 +54,7 @@ class MarketDataService:
         開始時刻・終了時刻でフィルタリング可能。
 
         Args:
-            timeframe (str): 時間足（'D1', 'H1', 'M10'）
+            timeframe (str): 時間足（'W1', 'D1', 'H1', 'M10'）
             start_time (Optional[datetime]): 取得開始時刻（含む）
             end_time (Optional[datetime]): 取得終了時刻（含む）
             limit (int, optional): 取得件数上限。デフォルトは100
@@ -98,7 +98,7 @@ class MarketDataService:
         指定時刻以前のデータを取得し、時系列順（昇順）で返す。
 
         Args:
-            timeframe (str): 時間足（'D1', 'H1', 'M10'）
+            timeframe (str): 時間足（'W1', 'D1', 'H1', 'M10'）
             before_time (datetime): この時刻以前のデータを取得
             limit (int, optional): 取得件数上限。デフォルトは100
 
@@ -133,7 +133,7 @@ class MarketDataService:
         """
         全時間足のデータ範囲を取得する
 
-        各時間足（D1, H1, M10）のデータ開始日、終了日、レコード数を取得。
+        各時間足（W1, D1, H1, M10）のデータ開始日、終了日、レコード数を取得。
         シミュレーション開始日の選択時に使用する。
 
         Returns:
@@ -144,7 +144,7 @@ class MarketDataService:
         """
         timeframes = {}
 
-        for tf in ["D1", "H1", "M10"]:
+        for tf in ["W1", "D1", "H1", "M10"]:
             result = (
                 self.db.query(
                     func.min(Candle.timestamp).label("start"),
@@ -182,7 +182,7 @@ class MarketDataService:
         指定時間足のローソク足数を取得する
 
         Args:
-            timeframe (str): 時間足（'D1', 'H1', 'M10'）
+            timeframe (str): 時間足（'W1', 'D1', 'H1', 'M10'）
 
         Returns:
             int: ローソク足の総数
@@ -197,7 +197,7 @@ class MarketDataService:
         注文の約定価格やポジションの含み損益計算に使用する。
 
         Args:
-            timeframe (str): 時間足（'D1', 'H1', 'M10'）
+            timeframe (str): 時間足（'W1', 'D1', 'H1', 'M10'）
             current_time (datetime): シミュレーション時刻
 
         Returns:

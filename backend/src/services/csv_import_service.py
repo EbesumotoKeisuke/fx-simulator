@@ -2,7 +2,7 @@
 CSVインポートサービス
 
 CSVファイルからローソク足データをデータベースにインポートする。
-各時間足（日足、1時間足、10分足）に対応したCSVファイルを読み込み、
+各時間足（週足、日足、1時間足、10分足）に対応したCSVファイルを読み込み、
 PostgreSQLのUPSERT機能を使用して重複データを更新する。
 
 使用例:
@@ -27,6 +27,7 @@ from src.models.candle import Candle
 # CSVファイルと時間足のマッピング
 # key: 時間足コード, value: CSVファイル名
 CSV_FILES = {
+    "W1": "fx_data_USDJPY_weekly_technical_indicator.csv",  # 週足
     "D1": "fx_data_USDJPY_technical_indicator.csv",       # 日足
     "H1": "fx_data_USDJPY_1hour_technical_indicator.csv", # 1時間足
     "M10": "fx_data_USDJPY_10minutes_technical_indicator.csv",  # 10分足
@@ -61,7 +62,7 @@ class CSVImportService:
         時間足に対応するCSVファイルのパスを取得する
 
         Args:
-            timeframe (str): 時間足（'D1', 'H1', 'M10'）
+            timeframe (str): 時間足（'W1', 'D1', 'H1', 'M10'）
 
         Returns:
             Optional[str]: CSVファイルの絶対パス、不明な時間足の場合はNone
@@ -87,7 +88,7 @@ class CSVImportService:
             - Volume: 出来高
 
         Args:
-            timeframe (str): 時間足（'D1', 'H1', 'M10'）
+            timeframe (str): 時間足（'W1', 'D1', 'H1', 'M10'）
 
         Returns:
             dict: インポート結果
@@ -119,6 +120,18 @@ class CSVImportService:
         # 必要なカラムのみ抽出
         records = []
         for _, row in df.iterrows():
+            # Volumeの値を安全に変換（数値以外の文字が含まれる場合は除去）
+            volume_value = 0
+            if pd.notna(row["Volume"]):
+                try:
+                    # 文字列の場合は数字のみを抽出
+                    volume_str = str(row["Volume"])
+                    # 数字以外の文字を除去
+                    volume_numeric = ''.join(filter(str.isdigit, volume_str))
+                    volume_value = int(volume_numeric) if volume_numeric else 0
+                except (ValueError, TypeError):
+                    volume_value = 0
+
             records.append({
                 "timeframe": timeframe,
                 "timestamp": row["timestamp"],
@@ -126,7 +139,7 @@ class CSVImportService:
                 "high": float(row["high"]),
                 "low": float(row["low"]),
                 "close": float(row["close"]),
-                "volume": int(row["Volume"]) if pd.notna(row["Volume"]) else 0,
+                "volume": volume_value,
             })
 
         # 一括UPSERT（重複は更新）
@@ -156,7 +169,7 @@ class CSVImportService:
         """
         すべての時間足のデータをインポートする
 
-        D1（日足）、H1（1時間足）、M10（10分足）の全てのCSVファイルを
+        W1（週足）、D1（日足）、H1（1時間足）、M10（10分足）の全てのCSVファイルを
         順番にインポートする。各時間足で発生したエラーは個別に記録され、
         他の時間足のインポートには影響しない。
 

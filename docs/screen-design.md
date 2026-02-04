@@ -404,7 +404,7 @@
 |------------|------|
 | React | UIフレームワーク |
 | TypeScript | 型安全な開発 |
-| Lightweight Charts (TradingView) | ローソク足チャート描画 |
+| Lightweight Charts | ローソク足チャート描画 |
 | Tailwind CSS | スタイリング |
 | React Query | API通信・キャッシュ |
 | Zustand | 状態管理 |

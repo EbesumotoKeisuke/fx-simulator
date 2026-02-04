@@ -31,6 +31,12 @@ function MainPage() {
   const [refreshTrigger, setRefreshTrigger] = useState(0)
   // チャート更新用のキー（シミュレーションID変更時にチャートを再作成）
   const [chartKey, setChartKey] = useState(0)
+  // チャート間で同期されたクロスヘア位置（時刻）
+  const [syncedCrosshairTime, setSyncedCrosshairTime] = useState<number | string | null>(null)
+  // チャート間で同期されたクロスヘア位置（価格）
+  const [syncedCrosshairPrice, setSyncedCrosshairPrice] = useState<number | null>(null)
+  // どのチャートがアクティブ（マウスオーバー中）か
+  const [activeChart, setActiveChart] = useState<string | null>(null)
   // シミュレーションタイマー用のref
   const timerRef = useRef<number | null>(null)
   // 現在時刻を保持するref（タイマーコールバック内で使用）
@@ -45,6 +51,7 @@ function MainPage() {
     speed,
     fetchStatus,
     stopSimulation,
+    resumeSimulation,
     advanceTime,
   } = useSimulationStore()
 
@@ -110,7 +117,7 @@ function MainPage() {
       const hour = String(newTime.getHours()).padStart(2, '0')
       const minute = String(newTime.getMinutes()).padStart(2, '0')
       const second = String(newTime.getSeconds()).padStart(2, '0')
-      const localIsoString = `${year}-${month}-${day}T${hour}:${minute}:${second}`
+      const localIsoString = `${year}-${month}-${day} ${hour}:${minute}:${second}`
 
       // バックエンドに時刻更新を通知
       try {
@@ -173,6 +180,16 @@ function MainPage() {
     setIsSettingsOpen(true)
   }
 
+  const handleStart = async () => {
+    // idle または stopped 状態の場合は設定モーダルを開く
+    if (status === 'idle' || status === 'stopped') {
+      setIsSettingsOpen(true)
+      return
+    }
+    // created または paused 状態の場合はシミュレーションを開始/再開
+    await resumeSimulation()
+  }
+
   const handleEnd = async () => {
     if (status === 'idle' || status === 'stopped') {
       return
@@ -180,8 +197,8 @@ function MainPage() {
 
     if (confirm('シミュレーションを終了しますか？')) {
       await stopSimulation()
-      // ポジションクローズと結果集計の完了を待つ
-      await new Promise(resolve => setTimeout(resolve, 500))
+      // ポジションクローズと結果集計の完了を待つ（1.5秒待機）
+      await new Promise(resolve => setTimeout(resolve, 1500))
       setIsResultOpen(true)
     }
   }
@@ -189,6 +206,11 @@ function MainPage() {
   const handleRefresh = () => {
     setRefreshTrigger((prev: number) => prev + 1)
     fetchCurrentPrice()
+  }
+
+  const handleCrosshairMove = (time: number | string | null, price: number | null) => {
+    setSyncedCrosshairTime(time)
+    setSyncedCrosshairPrice(price)
   }
 
   const formatTime = (date: Date | null) => {
@@ -207,19 +229,22 @@ function MainPage() {
       {/* Header */}
       <Header
         currentTime={currentTime || new Date()}
+        status={status}
         onDataManagement={handleDataManagement}
         onSettings={handleSettings}
+        onStart={handleStart}
         onEnd={handleEnd}
       />
 
       {/* Status Bar */}
-      <div className="px-4 py-1 bg-bg-card border-b border-border text-xs text-text-secondary flex items-center gap-4">
+      <div className="px-4 py-2 bg-bg-card border-b border-border text-base text-text-secondary flex items-center gap-4">
         <span>シミュレーション時刻: {formatTime(currentTime)}</span>
         <span>|</span>
         <span>状態: {
           status === 'running' ? '実行中' :
           status === 'paused' ? '一時停止' :
           status === 'stopped' ? '終了' :
+          status === 'created' ? '準備完了' :
           '未開始'
         }</span>
         {status === 'idle' && (
@@ -227,25 +252,83 @@ function MainPage() {
             ※ 「設定」ボタンからシミュレーションを開始してください
           </span>
         )}
+        {status === 'stopped' && (
+          <span className="text-yellow-400">
+            ※ 新しいシミュレーションを開始するには「設定」または「開始」ボタンをクリックしてください
+          </span>
+        )}
+        {status === 'created' && (
+          <span className="text-green-400">
+            ※ 「開始」ボタンをクリックしてシミュレーションを開始してください
+          </span>
+        )}
       </div>
 
       {/* Charts */}
-      <div className="flex-1 grid grid-cols-3 gap-2 p-2 min-h-0">
-        <ChartPanel key={`D1-${chartKey}`} title="日足 (D1)" timeframe="D1" currentTime={currentTime || undefined} />
-        <ChartPanel key={`H1-${chartKey}`} title="1時間足 (H1)" timeframe="H1" currentTime={currentTime || undefined} />
-        <ChartPanel key={`M10-${chartKey}`} title="10分足 (M10)" timeframe="M10" currentTime={currentTime || undefined} />
+      <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-2 p-2 min-h-0">
+        <ChartPanel
+          key={`W1-${chartKey}`}
+          title="週足 (W1)"
+          timeframe="W1"
+          currentTime={currentTime || undefined}
+          syncedCrosshairTime={syncedCrosshairTime}
+          syncedCrosshairPrice={syncedCrosshairPrice}
+          onCrosshairMove={handleCrosshairMove}
+          activeChart={activeChart}
+          onActiveChange={setActiveChart}
+          refreshTrigger={refreshTrigger}
+        />
+        <ChartPanel
+          key={`D1-${chartKey}`}
+          title="日足 (D1)"
+          timeframe="D1"
+          currentTime={currentTime || undefined}
+          syncedCrosshairTime={syncedCrosshairTime}
+          syncedCrosshairPrice={syncedCrosshairPrice}
+          onCrosshairMove={handleCrosshairMove}
+          activeChart={activeChart}
+          onActiveChange={setActiveChart}
+          refreshTrigger={refreshTrigger}
+        />
+        <ChartPanel
+          key={`H1-${chartKey}`}
+          title="1時間足 (H1)"
+          timeframe="H1"
+          currentTime={currentTime || undefined}
+          syncedCrosshairTime={syncedCrosshairTime}
+          syncedCrosshairPrice={syncedCrosshairPrice}
+          onCrosshairMove={handleCrosshairMove}
+          activeChart={activeChart}
+          onActiveChange={setActiveChart}
+          refreshTrigger={refreshTrigger}
+        />
+        <ChartPanel
+          key={`M10-${chartKey}`}
+          title="10分足 (M10)"
+          timeframe="M10"
+          currentTime={currentTime || undefined}
+          syncedCrosshairTime={syncedCrosshairTime}
+          syncedCrosshairPrice={syncedCrosshairPrice}
+          onCrosshairMove={handleCrosshairMove}
+          activeChart={activeChart}
+          onActiveChange={setActiveChart}
+          refreshTrigger={refreshTrigger}
+        />
       </div>
 
-      {/* Control Bar */}
-      <ControlBar currentPrice={currentPrice} onRefresh={handleRefresh} />
+      {/* Resizable bottom section (Control Bar + Position & Account) */}
+      <div className="resize-y overflow-auto border-t-2 border-border flex flex-col" style={{ height: '360px', minHeight: '200px', maxHeight: '600px' }}>
+        {/* Control Bar */}
+        <ControlBar currentPrice={currentPrice} onRefresh={handleRefresh} />
 
-      {/* Position & Account */}
-      <div className="grid grid-cols-3 gap-2 p-2">
-        <div className="col-span-2">
-          <PositionPanel refreshTrigger={refreshTrigger} />
-        </div>
-        <div>
-          <AccountInfo refreshTrigger={refreshTrigger} />
+        {/* Position & Account */}
+        <div className="flex-1 grid grid-cols-3 gap-2 p-2">
+          <div className="col-span-2">
+            <PositionPanel refreshTrigger={refreshTrigger} />
+          </div>
+          <div>
+            <AccountInfo refreshTrigger={refreshTrigger} />
+          </div>
         </div>
       </div>
 

@@ -13,14 +13,14 @@ router = APIRouter()
 
 @router.get("/candles")
 async def get_candles(
-    timeframe: str = Query(..., description="時間足（D1, H1, M10）"),
+    timeframe: str = Query(..., description="時間足（W1, D1, H1, M10）"),
     start_time: Optional[datetime] = Query(None, description="開始日時"),
     end_time: Optional[datetime] = Query(None, description="終了日時"),
     limit: int = Query(100, ge=1, le=1000, description="取得件数"),
     db: Session = Depends(get_db),
 ):
     """ローソク足データを取得する"""
-    if timeframe not in ["D1", "H1", "M10"]:
+    if timeframe not in ["W1", "D1", "H1", "M10"]:
         raise HTTPException(status_code=400, detail=f"Invalid timeframe: {timeframe}")
 
     service = MarketDataService(db)
@@ -37,13 +37,13 @@ async def get_candles(
 
 @router.get("/candles/before")
 async def get_candles_before(
-    timeframe: str = Query(..., description="時間足（D1, H1, M10）"),
+    timeframe: str = Query(..., description="時間足（W1, D1, H1, M10）"),
     before_time: datetime = Query(..., description="指定時刻"),
     limit: int = Query(100, ge=1, le=1000, description="取得件数"),
     db: Session = Depends(get_db),
 ):
     """指定時刻より前のローソク足データを取得する（シミュレーション用）"""
-    if timeframe not in ["D1", "H1", "M10"]:
+    if timeframe not in ["W1", "D1", "H1", "M10"]:
         raise HTTPException(status_code=400, detail=f"Invalid timeframe: {timeframe}")
 
     service = MarketDataService(db)
@@ -64,7 +64,7 @@ async def get_timeframes():
     return {
         "success": True,
         "data": {
-            "timeframes": ["D1", "H1", "M10"],
+            "timeframes": ["W1", "D1", "H1", "M10"],
         },
     }
 
@@ -101,7 +101,7 @@ async def import_csv(
     db: Session = Depends(get_db),
 ):
     """指定した時間足のCSVファイルをインポートする"""
-    if timeframe not in ["D1", "H1", "M10"]:
+    if timeframe not in ["W1", "D1", "H1", "M10"]:
         raise HTTPException(status_code=400, detail=f"Invalid timeframe: {timeframe}")
 
     service = CSVImportService(db)

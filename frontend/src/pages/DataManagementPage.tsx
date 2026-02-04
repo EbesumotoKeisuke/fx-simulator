@@ -7,6 +7,7 @@ type TimeframeLabel = {
 }
 
 const TIMEFRAME_LABELS: TimeframeLabel = {
+  W1: '週足',
   D1: '日足',
   H1: '1時間足',
   M10: '10分足',
@@ -19,6 +20,14 @@ function DataManagementPage() {
   const [loading, setLoading] = useState(true)
   const [importing, setImporting] = useState<string | null>(null)
   const [importResult, setImportResult] = useState<string | null>(null)
+  // シミュレーション設定のデフォルト値
+  const [defaultInitialBalance, setDefaultInitialBalance] = useState(() => {
+    return localStorage.getItem('defaultInitialBalance') || '1000000'
+  })
+  const [defaultSpeed, setDefaultSpeed] = useState(() => {
+    return localStorage.getItem('defaultSpeed') || '1'
+  })
+  const [settingsSaved, setSettingsSaved] = useState(false)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -105,6 +114,13 @@ function DataManagementPage() {
     return new Date(dateStr).toLocaleDateString('ja-JP')
   }
 
+  const handleSaveSettings = () => {
+    localStorage.setItem('defaultInitialBalance', defaultInitialBalance)
+    localStorage.setItem('defaultSpeed', defaultSpeed)
+    setSettingsSaved(true)
+    setTimeout(() => setSettingsSaved(false), 3000)
+  }
+
   return (
     <div className="min-h-screen bg-bg-primary p-4">
       {/* Header */}
@@ -118,6 +134,93 @@ function DataManagementPage() {
         >
           ← 戻る
         </button>
+      </div>
+
+      {/* Instructions */}
+      <div className="bg-bg-card rounded-lg p-4 mb-6">
+        <h2 className="text-lg font-semibold text-text-strong mb-4">
+          データ配置方法
+        </h2>
+        <div className="text-text-primary text-sm space-y-2">
+          <p>
+            CSVファイルを以下のフォルダに配置してください：
+          </p>
+          <code className="block bg-bg-primary p-2 rounded font-mono">
+            backend/data/
+          </code>
+          <p className="mt-4">必要なファイル：</p>
+          <ul className="list-disc list-inside ml-2">
+            <li>fx_data_USDJPY_weekly_technical_indicator.csv（週足）</li>
+            <li>fx_data_USDJPY_technical_indicator.csv（日足）</li>
+            <li>fx_data_USDJPY_1hour_technical_indicator.csv（1時間足）</li>
+            <li>fx_data_USDJPY_10minutes_technical_indicator.csv（10分足）</li>
+          </ul>
+          <p className="mt-4">CSVフォーマット（OHLCV形式）：</p>
+          <code className="block bg-bg-primary p-2 rounded font-mono text-xs">
+            time,open,high,low,close,Volume
+          </code>
+        </div>
+      </div>
+
+      {/* Simulation Default Settings */}
+      <div className="bg-bg-card rounded-lg p-4 mb-6">
+        <h2 className="text-lg font-semibold text-text-strong mb-4">
+          シミュレーション設定（デフォルト値）
+        </h2>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-text-primary text-sm mb-1">初期資金</label>
+            <div className="relative">
+              <span className="absolute left-3 top-2 text-text-primary">¥</span>
+              <input
+                type="number"
+                value={defaultInitialBalance}
+                onChange={(e) => setDefaultInitialBalance(e.target.value)}
+                min="10000"
+                step="10000"
+                className="w-full p-2 pl-6 bg-bg-primary text-text-primary border border-border rounded"
+              />
+            </div>
+            <p className="text-xs text-text-secondary mt-1">
+              シミュレーション設定画面の初期資金のデフォルト値として使用されます
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-text-primary text-sm mb-1">再生速度</label>
+            <select
+              value={defaultSpeed}
+              onChange={(e) => setDefaultSpeed(e.target.value)}
+              className="w-full p-2 bg-bg-primary text-text-primary border border-border rounded"
+            >
+              <option value="0.1">0.1x</option>
+              <option value="0.25">0.25x</option>
+              <option value="0.5">0.5x</option>
+              <option value="0.75">0.75x</option>
+              <option value="1">1x</option>
+              <option value="2">2x</option>
+              <option value="5">5x</option>
+              <option value="6">6x</option>
+              <option value="7.5">7.5x</option>
+              <option value="10">10x</option>
+            </select>
+            <p className="text-xs text-text-secondary mt-1">
+              シミュレーション設定画面の再生速度のデフォルト値として使用されます
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleSaveSettings}
+              className="px-4 py-2 bg-btn-primary text-text-strong rounded hover:opacity-80"
+            >
+              設定を保存
+            </button>
+            {settingsSaved && (
+              <span className="text-green-400 text-sm">保存しました</span>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* CSV File Status */}
@@ -193,7 +296,7 @@ function DataManagementPage() {
               </tr>
             </thead>
             <tbody>
-              {['D1', 'H1', 'M10'].map((tf) => {
+              {['W1', 'D1', 'H1', 'M10'].map((tf) => {
                 const tfData = dateRange?.timeframes?.[tf]
                 return (
                   <tr key={tf} className="border-b border-border">
@@ -216,38 +319,13 @@ function DataManagementPage() {
 
       {/* Import Result */}
       {importResult && (
-        <div className="bg-bg-card rounded-lg p-4 mb-6">
+        <div className="bg-bg-card rounded-lg p-4">
           <h2 className="text-lg font-semibold text-text-strong mb-2">
             インポート結果
           </h2>
           <pre className="text-text-primary whitespace-pre-wrap">{importResult}</pre>
         </div>
       )}
-
-      {/* Instructions */}
-      <div className="bg-bg-card rounded-lg p-4">
-        <h2 className="text-lg font-semibold text-text-strong mb-4">
-          データ配置方法
-        </h2>
-        <div className="text-text-primary text-sm space-y-2">
-          <p>
-            CSVファイルを以下のフォルダに配置してください：
-          </p>
-          <code className="block bg-bg-primary p-2 rounded font-mono">
-            backend/data/
-          </code>
-          <p className="mt-4">必要なファイル：</p>
-          <ul className="list-disc list-inside ml-2">
-            <li>fx_data_USDJPY_technical_indicator.csv（日足）</li>
-            <li>fx_data_USDJPY_1hour_technical_indicator.csv（1時間足）</li>
-            <li>fx_data_USDJPY_10minutes_technical_indicator.csv（10分足）</li>
-          </ul>
-          <p className="mt-4">CSVフォーマット（OHLCV形式）：</p>
-          <code className="block bg-bg-primary p-2 rounded font-mono text-xs">
-            time,open,high,low,close,Volume
-          </code>
-        </div>
-      </div>
     </div>
   )
 }

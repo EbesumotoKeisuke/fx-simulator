@@ -40,7 +40,7 @@ async def create_order(
 
 @router.get("")
 async def get_orders(
-    limit: int = Query(50, ge=1, le=100),
+    limit: int = Query(50, ge=1, le=10000),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ):

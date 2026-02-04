@@ -41,8 +41,8 @@ function AccountInfo({ refreshTrigger }: AccountInfoProps) {
   if (!account || status === 'idle') {
     return (
       <div className="bg-bg-card rounded-lg p-3">
-        <h3 className="text-sm font-semibold text-text-strong mb-2">口座情報</h3>
-        <div className="text-center text-text-secondary text-sm py-4">
+        <h3 className="text-lg font-semibold text-text-strong mb-2">口座情報</h3>
+        <div className="text-center text-text-secondary text-lg py-4">
           シミュレーション未開始
         </div>
       </div>
@@ -53,9 +53,9 @@ function AccountInfo({ refreshTrigger }: AccountInfoProps) {
   const profitLossPercent = ((profitLoss / account.initial_balance) * 100).toFixed(2)
 
   return (
-    <div className="bg-bg-card rounded-lg p-3">
-      <h3 className="text-sm font-semibold text-text-strong mb-2">口座情報</h3>
-      <div className="space-y-1 text-xs">
+    <div className="bg-bg-card rounded-lg p-3 h-full overflow-auto">
+      <h3 className="text-lg font-semibold text-text-strong mb-2">口座情報</h3>
+      <div className="space-y-2 text-lg">
         <div className="flex justify-between">
           <span className="text-text-primary">初期資金:</span>
           <span className="text-text-strong">¥{account.initial_balance.toLocaleString()}</span>
@@ -68,7 +68,7 @@ function AccountInfo({ refreshTrigger }: AccountInfoProps) {
           <span className="text-text-primary">有効証拠金:</span>
           <span className="text-text-strong">¥{account.equity.toLocaleString()}</span>
         </div>
-        <div className="flex justify-between border-t border-border pt-1 mt-1">
+        <div className="flex justify-between border-t border-border pt-1.5 mt-1.5">
           <span className="text-text-primary">含み損益:</span>
           <span className={account.unrealized_pnl >= 0 ? 'text-buy' : 'text-sell'}>
             {account.unrealized_pnl >= 0 ? '+' : ''}¥{account.unrealized_pnl.toLocaleString()}
@@ -80,7 +80,7 @@ function AccountInfo({ refreshTrigger }: AccountInfoProps) {
             {account.realized_pnl >= 0 ? '+' : ''}¥{account.realized_pnl.toLocaleString()}
           </span>
         </div>
-        <div className="flex justify-between border-t border-border pt-1 mt-1">
+        <div className="flex justify-between border-t border-border pt-1.5 mt-1.5">
           <span className="text-text-primary">トータル損益:</span>
           <span className={`font-semibold ${profitLoss >= 0 ? 'text-buy' : 'text-sell'}`}>
             {profitLoss >= 0 ? '+' : ''}¥{profitLoss.toLocaleString()}
