@@ -28,7 +28,8 @@
       "Bash(docker exec:*)",
       "Bash(docker restart:*)",
       "Bash(pip install:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(docker logs:*)"
     ]
   }
 }

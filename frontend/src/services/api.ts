@@ -182,6 +182,35 @@ export const marketDataApi = {
   },
 
   /**
+   * 最新のローソク足を部分的に生成して取得する（未来データ非表示対応）
+   *
+   * 指定時刻より前のローソク足データを取得し、最新のローソク足のみを
+   * current_time までのデータで動的に生成します。
+   *
+   * これにより、上位時間足で未来のデータが表示されることを防ぎます。
+   * 例：current_time が 12:30 の場合、1時間足の 12:00 台のローソク足は
+   * 12:00〜12:30 のデータのみから生成されます。
+   *
+   * @param timeframe - 時間枠（例: 'W1', 'D1', 'H1', 'M10'）
+   * @param currentTime - 現在時刻（シミュレーション時刻、ISO形式）
+   * @param limit - 取得する最大件数（デフォルト: 100）
+   * @returns ローソク足データの配列を含むレスポンス
+   */
+  getCandlesPartial: (
+    timeframe: string,
+    currentTime: string,
+    limit: number = 100
+  ) => {
+    // URLパラメータを構築
+    const params = new URLSearchParams({
+      timeframe,
+      current_time: currentTime,
+      limit: String(limit),
+    })
+    return fetchApi<CandlesResponse>(`/market-data/candles/partial?${params}`)
+  },
+
+  /**
    * 利用可能な時間枠の一覧を取得する
    *
    * データベースに存在する全ての時間枠（1分足、5分足、1時間足など）の

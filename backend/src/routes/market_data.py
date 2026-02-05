@@ -58,6 +58,38 @@ async def get_candles_before(
     }
 
 
+@router.get("/candles/partial")
+async def get_candles_partial(
+    timeframe: str = Query(..., description="時間足（W1, D1, H1, M10）"),
+    current_time: datetime = Query(..., description="現在時刻（シミュレーション時刻）"),
+    limit: int = Query(100, ge=1, le=1000, description="取得件数"),
+    db: Session = Depends(get_db),
+):
+    """
+    最新のローソク足を部分的に生成して返す（未来データ非表示対応）
+
+    指定時刻より前のローソク足データを取得し、最新のローソク足のみを
+    current_time までのデータで動的に生成する。
+
+    これにより、上位時間足で未来のデータが表示されることを防ぐ。
+    例：current_time が 12:30 の場合、1時間足の 12:00 台のローソク足は
+    12:00〜12:30 のデータのみから生成される。
+    """
+    if timeframe not in ["W1", "D1", "H1", "M10"]:
+        raise HTTPException(status_code=400, detail=f"Invalid timeframe: {timeframe}")
+
+    service = MarketDataService(db)
+    candles = service.get_candles_with_partial_last(timeframe, current_time, limit)
+
+    return {
+        "success": True,
+        "data": {
+            "timeframe": timeframe,
+            "candles": candles,
+        },
+    }
+
+
 @router.get("/timeframes")
 async def get_timeframes():
     """利用可能な時間足一覧を取得する"""

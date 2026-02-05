@@ -295,12 +295,22 @@ function ChartPanel({
     try {
       let response
       if (currentTime) {
-        // JSTのままAPIに送信
-        response = await marketDataApi.getCandlesBefore(
-          timeframe,
-          toLocalISOString(currentTime),
-          200
-        )
+        // M10（10分足）は最小単位なので、既存のgetCandlesBeforeを使用
+        // H1、D1、W1は未来データ非表示のため、getCandlesPartialを使用
+        if (timeframe === 'M10') {
+          response = await marketDataApi.getCandlesBefore(
+            timeframe,
+            toLocalISOString(currentTime),
+            200
+          )
+        } else {
+          // 未来データ非表示対応: 最新のローソク足を部分的に生成
+          response = await marketDataApi.getCandlesPartial(
+            timeframe,
+            toLocalISOString(currentTime),
+            200
+          )
+        }
       } else {
         response = await marketDataApi.getCandles(timeframe, undefined, undefined, 200)
       }

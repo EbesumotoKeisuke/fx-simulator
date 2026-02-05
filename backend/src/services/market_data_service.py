@@ -12,7 +12,7 @@
     price = service.get_current_price('M10', datetime.now())
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy import func
@@ -233,3 +233,213 @@ class MarketDataService:
             .order_by(Candle.timestamp.desc())
             .first()
         )
+
+    def calculate_candle_start_time(self, timeframe: str, current_time: datetime) -> datetime:
+        """
+        ローソク足の開始時刻を計算する
+
+        各時間足に応じて、現在時刻を含むローソク足の開始時刻を計算する。
+        最新のローソク足を動的生成する際に使用する。
+
+        Args:
+            timeframe (str): 時間足（'W1', 'D1', 'H1', 'M10'）
+            current_time (datetime): 現在時刻（シミュレーション時刻）
+
+        Returns:
+            datetime: ローソク足の開始時刻
+
+        Examples:
+            >>> # 1時間足の場合（12:30 → 12:00）
+            >>> calculate_candle_start_time('H1', datetime(2024, 12, 30, 12, 30))
+            datetime(2024, 12, 30, 12, 0)
+
+            >>> # 日足の場合（12:30 → 7:00）
+            >>> calculate_candle_start_time('D1', datetime(2024, 12, 30, 12, 30))
+            datetime(2024, 12, 30, 7, 0)
+
+            >>> # 週足の場合（月曜日を週の開始とする）
+            >>> calculate_candle_start_time('W1', datetime(2024, 12, 30, 12, 30))
+            datetime(2024, 12, 30, 7, 0)  # 月曜日7:00
+        """
+        if timeframe == 'M10':
+            # 10分足: 現在時刻の10分単位の開始時刻（例：12:35 → 12:30）
+            minute = (current_time.minute // 10) * 10
+            return current_time.replace(minute=minute, second=0, microsecond=0)
+        elif timeframe == 'H1':
+            # 1時間足: 現在時刻の「時」の開始時刻（例：12:30 → 12:00）
+            return current_time.replace(minute=0, second=0, microsecond=0)
+        elif timeframe == 'D1':
+            # 日足: 現在日の開始時刻（7:00）
+            day_start = current_time.replace(hour=7, minute=0, second=0, microsecond=0)
+            if current_time.hour < 7:
+                # 7:00より前の場合は前日の7:00
+                day_start -= timedelta(days=1)
+            return day_start
+        elif timeframe == 'W1':
+            # 週足: 現在週の開始時刻（月曜日7:00）
+            # ISO週定義: 月曜日を週の開始とする
+            days_since_monday = current_time.weekday()  # 月曜=0, 日曜=6
+            week_start = current_time - timedelta(days=days_since_monday)
+            week_start = week_start.replace(hour=7, minute=0, second=0, microsecond=0)
+            if current_time.weekday() == 0 and current_time.hour < 7:
+                # 月曜日の7:00より前の場合は前週の月曜日7:00
+                week_start -= timedelta(days=7)
+            return week_start
+        else:
+            raise ValueError(f"Unsupported timeframe: {timeframe}")
+
+    def generate_partial_candle(
+        self,
+        timeframe: str,
+        start_time: datetime,
+        current_time: datetime,
+    ) -> Optional[dict]:
+        """
+        部分的なローソク足を動的に生成する
+
+        指定された時間足の最新のローソク足を、より細かい時間足のデータから集約して生成する。
+        start_time から current_time までのデータのみを使用する。
+
+        集約元の時間足:
+        - H1（1時間足）: M10（10分足）から集約
+        - D1（日足）: H1（1時間足）から集約
+        - W1（週足）: D1（日足）から集約
+
+        Args:
+            timeframe (str): 時間足（'W1', 'D1', 'H1', 'M10'）
+            start_time (datetime): ローソク足の開始時刻
+            current_time (datetime): 現在時刻（この時刻までのデータを使用）
+
+        Returns:
+            Optional[dict]: ローソク足データ（timestamp, open, high, low, close, volume）
+                元データが0件の場合はNone
+
+        Examples:
+            >>> # 1時間足の12:00台を12:00〜12:30のデータから生成
+            >>> generate_partial_candle('H1', datetime(2024, 12, 30, 12, 0), datetime(2024, 12, 30, 12, 30))
+            {
+                'timestamp': '2024-12-30T12:00:00',
+                'open': 145.50,
+                'high': 145.80,
+                'low': 145.30,
+                'close': 145.65,
+                'volume': 12500
+            }
+        """
+        # 集約元の時間足を決定
+        if timeframe == 'H1':
+            source_timeframe = 'M10'  # 10分足から集約
+        elif timeframe == 'D1':
+            source_timeframe = 'H1'   # 1時間足から集約
+        elif timeframe == 'W1':
+            source_timeframe = 'D1'   # 日足から集約
+        elif timeframe == 'M10':
+            # 10分足は最小単位なので、部分的な生成は不要
+            # DBから直接取得したデータをそのまま使用
+            return None
+        else:
+            raise ValueError(f"Unsupported timeframe: {timeframe}")
+
+        # start_time 〜 current_time の元データを取得
+        source_candles = (
+            self.db.query(Candle)
+            .filter(Candle.timeframe == source_timeframe)
+            .filter(Candle.timestamp >= start_time)
+            .filter(Candle.timestamp <= current_time)
+            .order_by(Candle.timestamp.asc())
+            .all()
+        )
+
+        # 元データが0件の場合はNoneを返す
+        if not source_candles:
+            return None
+
+        # OHLCを計算
+        return {
+            'timestamp': start_time.isoformat(),
+            'open': float(source_candles[0].open),              # 最初のデータの始値
+            'high': float(max(c.high for c in source_candles)), # 全データの高値の最大値
+            'low': float(min(c.low for c in source_candles)),   # 全データの安値の最小値
+            'close': float(source_candles[-1].close),           # 最後のデータの終値
+            'volume': sum(c.volume for c in source_candles)     # 全データの出来高の合計
+        }
+
+    def get_candles_with_partial_last(
+        self,
+        timeframe: str,
+        current_time: datetime,
+        limit: int = 100,
+    ) -> list[dict]:
+        """
+        最新のローソク足を部分的に生成して返す（未来データ非表示対応）
+
+        指定時刻より前のローソク足データを取得し、最新のローソク足のみを
+        current_time までのデータで動的に生成する。
+
+        これにより、上位時間足で未来のデータが表示されることを防ぐ。
+        例：current_time が 12:30 の場合、1時間足の 12:00 台のローソク足は
+        12:00〜12:30 のデータのみから生成される。
+
+        Args:
+            timeframe (str): 時間足（'W1', 'D1', 'H1', 'M10'）
+            current_time (datetime): シミュレーション時刻
+            limit (int, optional): 取得件数上限。デフォルトは100
+
+        Returns:
+            list[dict]: ローソク足データのリスト（時系列順）
+                最新のローソク足は動的生成されたもの
+
+        Examples:
+            >>> # 1時間足を取得（current_time = 12:30）
+            >>> get_candles_with_partial_last('H1', datetime(2024, 12, 30, 12, 30), limit=10)
+            [
+                # 11:00台までは完全なOHLC
+                {'timestamp': '2024-12-30T11:00:00', 'open': 145.20, ...},
+                # 12:00台は12:00〜12:30のみのOHLC（動的生成）
+                {'timestamp': '2024-12-30T12:00:00', 'open': 145.50, ...}
+            ]
+        """
+        # 10分足は最小単位なので、動的生成は不要（既存ロジックをそのまま使用）
+        if timeframe == 'M10':
+            return self.get_candles_before(timeframe, current_time, limit)
+
+        # 1. 最新のローソク足の開始時刻を計算
+        latest_candle_start = self.calculate_candle_start_time(timeframe, current_time)
+
+        # 2. current_time以前の全てのローソク足を取得（旧APIと同じ）
+        all_candles = self.get_candles_before(timeframe, current_time, limit)
+
+        if not all_candles:
+            # データが0件の場合、最新のローソク足のみを生成して返す
+            partial_candle = self.generate_partial_candle(timeframe, latest_candle_start, current_time)
+            return [partial_candle] if partial_candle else []
+
+        # 2.5. 日足の場合、タイムスタンプが7:00未満のローソク足は前日のデータとして扱う
+        if timeframe == 'D1':
+            adjusted_candles = []
+            for c in all_candles:
+                candle_time = datetime.fromisoformat(c['timestamp'])
+                # タイムスタンプが7:00未満の場合、前日の7:00に調整
+                # 例：4/1 0:00 → 3/31 7:00（3/31の日足データ）
+                if candle_time.hour < 7:
+                    adjusted_time = (candle_time - timedelta(days=1)).replace(hour=7, minute=0, second=0, microsecond=0)
+                    c_adjusted = c.copy()
+                    c_adjusted['timestamp'] = adjusted_time.isoformat()
+                    adjusted_candles.append(c_adjusted)
+                else:
+                    adjusted_candles.append(c)
+            all_candles = adjusted_candles
+
+        # 3. 最新のローソク足をリストから除外
+        # （DBに存在する場合、未来データを含む完全なOHLCなので除外する）
+        latest_candle_start_iso = latest_candle_start.isoformat()
+        filtered_candles = [c for c in all_candles if c['timestamp'] != latest_candle_start_iso]
+
+        # 4. 最新のローソク足を10分足から動的生成
+        partial_candle = self.generate_partial_candle(timeframe, latest_candle_start, current_time)
+
+        # 5. 最新のローソク足を追加（Noneでない場合）
+        if partial_candle:
+            filtered_candles.append(partial_candle)
+
+        return filtered_candles
