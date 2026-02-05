@@ -395,6 +395,14 @@ export interface OrderRequest {
   side: 'buy' | 'sell'
   /** ロットサイズ（0.01〜1.0） */
   lot_size: number
+  /** 損切り価格（省略可） */
+  sl_price?: number
+  /** 利確価格（省略可） */
+  tp_price?: number
+  /** 損切りpips（省略可） */
+  sl_pips?: number
+  /** 利確pips（省略可） */
+  tp_pips?: number
 }
 
 export interface Order {
@@ -403,6 +411,45 @@ export interface Order {
   lot_size: number
   entry_price: number
   executed_at: string
+}
+
+/**
+ * 予約注文リクエストのインターフェース
+ */
+export interface PendingOrderRequest {
+  /** 注文タイプ（'limit': 指値, 'stop': 逆指値） */
+  order_type: 'limit' | 'stop'
+  /** 売買方向（'buy': 買い, 'sell': 売り） */
+  side: 'buy' | 'sell'
+  /** ロットサイズ（0.01〜100.0） */
+  lot_size: number
+  /** トリガー価格 */
+  trigger_price: number
+}
+
+/**
+ * 予約注文更新リクエストのインターフェース
+ */
+export interface UpdatePendingOrderRequest {
+  /** ロットサイズ（省略可） */
+  lot_size?: number
+  /** トリガー価格（省略可） */
+  trigger_price?: number
+}
+
+/**
+ * 予約注文情報のインターフェース
+ */
+export interface PendingOrder {
+  order_id: string
+  order_type: 'limit' | 'stop'
+  side: 'buy' | 'sell'
+  lot_size: number
+  trigger_price: number
+  status: 'pending' | 'executed' | 'cancelled'
+  created_at: string
+  executed_at?: string
+  updated_at?: string
 }
 
 export const ordersApi = {
@@ -444,6 +491,74 @@ export const ordersApi = {
     })
     return fetchApi<{ orders: Order[]; total: number }>(`/orders?${params}`)
   },
+
+  /**
+   * 予約注文（指値・逆指値）を作成する
+   *
+   * @param data - 予約注文パラメータ
+   * @returns 作成された予約注文情報
+   */
+  createPending: (data: PendingOrderRequest) => {
+    return fetchApi<PendingOrder>('/orders/pending', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  },
+
+  /**
+   * 未約定の予約注文一覧を取得する
+   *
+   * @param limit - 取得する最大件数（デフォルト: 50）
+   * @param offset - 取得開始位置（デフォルト: 0）
+   * @param status - 状態フィルター（省略可）
+   * @returns 予約注文の配列と総件数
+   */
+  getPendingOrders: (limit: number = 50, offset: number = 0, status?: string) => {
+    const params = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+    })
+    if (status) {
+      params.append('status', status)
+    }
+    return fetchApi<{ orders: PendingOrder[]; total: number }>(`/orders/pending?${params}`)
+  },
+
+  /**
+   * 予約注文の詳細を取得する
+   *
+   * @param orderId - 注文ID
+   * @returns 予約注文の詳細情報
+   */
+  getPendingOrder: (orderId: string) => {
+    return fetchApi<PendingOrder>(`/orders/pending/${orderId}`)
+  },
+
+  /**
+   * 予約注文を変更する
+   *
+   * @param orderId - 注文ID
+   * @param data - 更新パラメータ
+   * @returns 更新後の予約注文情報
+   */
+  updatePendingOrder: (orderId: string, data: UpdatePendingOrderRequest) => {
+    return fetchApi<PendingOrder>(`/orders/pending/${orderId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  },
+
+  /**
+   * 予約注文をキャンセルする
+   *
+   * @param orderId - 注文ID
+   * @returns キャンセル結果
+   */
+  cancelPendingOrder: (orderId: string) => {
+    return fetchApi<{ order_id: string; status: string; cancelled_at: string }>(`/orders/pending/${orderId}`, {
+      method: 'DELETE',
+    })
+  },
 }
 
 // ============================================
@@ -468,8 +583,30 @@ export interface Position {
   unrealized_pnl?: number
   /** 含み損益（pips） */
   unrealized_pnl_pips?: number
+  /** 損切り価格 */
+  sl_price?: number
+  /** 利確価格 */
+  tp_price?: number
+  /** 損切りpips */
+  sl_pips?: number
+  /** 利確pips */
+  tp_pips?: number
   /** ポジションオープン時刻 */
   opened_at: string
+}
+
+/**
+ * SL/TP設定リクエストのインターフェース
+ */
+export interface SetSLTPRequest {
+  /** 損切り価格（省略可） */
+  sl_price?: number
+  /** 利確価格（省略可） */
+  tp_price?: number
+  /** 損切りpips（省略可） */
+  sl_pips?: number
+  /** 利確pips（省略可） */
+  tp_pips?: number
 }
 
 export const positionsApi = {
@@ -503,6 +640,23 @@ export const positionsApi = {
   close: (positionId: string) => {
     return fetchApi<Position>(`/positions/${positionId}/close`, {
       method: 'POST',
+    })
+  },
+
+  /**
+   * ポジションにSL/TPを設定する
+   *
+   * 既存のポジションに対して損切り（Stop Loss）と利確（Take Profit）を設定します。
+   * 価格指定またはpips指定のいずれかで設定できます。
+   *
+   * @param positionId - ポジションID
+   * @param data - SL/TP設定パラメータ
+   * @returns 更新後のポジション情報
+   */
+  setSltp: (positionId: string, data: SetSLTPRequest) => {
+    return fetchApi<Position>(`/positions/${positionId}/sl-tp`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
     })
   },
 }
@@ -636,5 +790,125 @@ export const tradesApi = {
     const url = `${API_BASE_URL}/trades/export`
     // 新しいタブでCSVダウンロードを開始
     window.open(url, '_blank')
+  },
+}
+
+// ============================================
+// パフォーマンス分析 API
+// ============================================
+
+/**
+ * パフォーマンス指標のインターフェース
+ */
+export interface PerformanceMetrics {
+  basic: {
+    win_rate: number
+    total_pnl: number
+    gross_profit: number
+    gross_loss: number
+    total_trades: number
+    winning_trades: number
+    losing_trades: number
+  }
+  risk_return: {
+    profit_factor: number
+    average_win: number
+    average_loss: number
+    risk_reward_ratio: number
+    max_win: number
+    max_loss: number
+    max_win_pips: number
+    max_loss_pips: number
+  }
+  drawdown: {
+    max_drawdown: number
+    max_drawdown_percent: number
+    max_drawdown_duration_days: number
+  }
+  consecutive: {
+    max_consecutive_wins: number
+    max_consecutive_losses: number
+  }
+  period: {
+    start_date: string
+    end_date: string
+    duration_days: number
+  }
+}
+
+/**
+ * 資産曲線データポイントのインターフェース
+ */
+export interface EquityCurvePoint {
+  timestamp: string
+  balance: number
+  equity: number
+  cumulative_pnl: number
+}
+
+/**
+ * 資産曲線データのインターフェース
+ */
+export interface EquityCurveData {
+  points: EquityCurvePoint[]
+  initial_balance: number
+  final_balance: number
+}
+
+/**
+ * ドローダウンデータポイントのインターフェース
+ */
+export interface DrawdownPoint {
+  timestamp: string
+  equity: number
+  peak_equity: number
+  drawdown: number
+  drawdown_percent: number
+}
+
+/**
+ * ドローダウンデータのインターフェース
+ */
+export interface DrawdownData {
+  points: DrawdownPoint[]
+  max_drawdown: number
+  max_drawdown_percent: number
+}
+
+export const analyticsApi = {
+  /**
+   * パフォーマンス指標を取得する
+   *
+   * 勝率、プロフィットファクター、最大ドローダウンなどの
+   * パフォーマンス指標を取得します。
+   *
+   * @returns パフォーマンス指標データ
+   */
+  getPerformance: () => {
+    return fetchApi<PerformanceMetrics>('/analytics/performance')
+  },
+
+  /**
+   * 資産曲線データを取得する
+   *
+   * トレードごとの資産推移データを取得します。
+   *
+   * @param interval - データ間隔（'trade', 'hour', 'day'）
+   * @returns 資産曲線データ
+   */
+  getEquityCurve: (interval: 'trade' | 'hour' | 'day' = 'trade') => {
+    const params = new URLSearchParams({ interval })
+    return fetchApi<EquityCurveData>(`/analytics/equity-curve?${params}`)
+  },
+
+  /**
+   * ドローダウンデータを取得する
+   *
+   * ドローダウンの推移データを取得します。
+   *
+   * @returns ドローダウンデータ
+   */
+  getDrawdown: () => {
+    return fetchApi<DrawdownData>('/analytics/drawdown')
   },
 }

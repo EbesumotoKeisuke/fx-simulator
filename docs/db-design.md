@@ -32,25 +32,27 @@
 | created_at       |       +------------------+
 +------------------+              |
                                   |
-        +-------------------------+-------------------------+
-        |                         |                         |
-        v                         v                         v
-+------------------+       +------------------+       +------------------+
-|     orders       |       |    positions     |       |     trades       |
-+------------------+       +------------------+       +------------------+
-| id (PK)          |       | id (PK)          |       | id (PK)          |
-| simulation_id(FK)|       | simulation_id(FK)|       | simulation_id(FK)|
-| side             |       | order_id (FK)    |       | position_id (FK) |
-| lot_size         |       | side             |       | side             |
-| entry_price      |       | lot_size         |       | lot_size         |
-| executed_at      |       | entry_price      |       | entry_price      |
-| created_at       |       | status           |       | exit_price       |
-+------------------+       | opened_at        |       | realized_pnl     |
-                           | closed_at        |       | realized_pnl_pips|
-                           | created_at       |       | opened_at        |
-                           +------------------+       | closed_at        |
-                                                      | created_at       |
-                                                      +------------------+
+        +-------------------------+-------------------------+-------------------------+
+        |                         |                         |                         |
+        v                         v                         v                         v
++------------------+       +------------------+       +------------------+       +------------------+
+|     orders       |       |    positions     |       |     trades       |       | pending_orders   |
++------------------+       +------------------+       +------------------+       +------------------+
+| id (PK)          |       | id (PK)          |       | id (PK)          |       | id (PK)          |
+| simulation_id(FK)|       | simulation_id(FK)|       | simulation_id(FK)|       | simulation_id(FK)|
+| side             |       | order_id (FK)    |       | position_id (FK) |       | order_type       |
+| lot_size         |       | side             |       | side             |       | side             |
+| entry_price      |       | lot_size         |       | lot_size         |       | lot_size         |
+| executed_at      |       | entry_price      |       | entry_price      |       | trigger_price    |
+| created_at       |       | status           |       | exit_price       |       | status           |
++------------------+       | sl_price         |       | realized_pnl     |       | created_at       |
+                           | tp_price         |       | realized_pnl_pips|       | executed_at      |
+                           | sl_pips          |       | opened_at        |       | updated_at       |
+                           | tp_pips          |       | closed_at        |       +------------------+
+                           | opened_at        |       | created_at       |
+                           | closed_at        |       +------------------+
+                           | created_at       |
+                           +------------------+
 ```
 
 ---
@@ -231,6 +233,10 @@ CREATE INDEX idx_orders_executed_at ON orders(executed_at);
 | lot_size | DECIMAL(10,2) | NO | - | ロットサイズ |
 | entry_price | DECIMAL(10,5) | NO | - | エントリー価格 |
 | status | VARCHAR(20) | NO | 'open' | 状態（open, closed） |
+| sl_price | DECIMAL(10,5) | YES | - | 損切り価格（Stop Loss） |
+| tp_price | DECIMAL(10,5) | YES | - | 利確価格（Take Profit） |
+| sl_pips | DECIMAL(10,2) | YES | - | 損切りpips（Stop Loss pips） |
+| tp_pips | DECIMAL(10,2) | YES | - | 利確pips（Take Profit pips） |
 | opened_at | TIMESTAMP | NO | - | ポジション開設日時 |
 | closed_at | TIMESTAMP | YES | - | ポジション決済日時 |
 | created_at | TIMESTAMP | NO | CURRENT_TIMESTAMP | 作成日時 |
@@ -253,6 +259,10 @@ CREATE TABLE positions (
     lot_size DECIMAL(10,2) NOT NULL,
     entry_price DECIMAL(10,5) NOT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'open',
+    sl_price DECIMAL(10,5),
+    tp_price DECIMAL(10,5),
+    sl_pips DECIMAL(10,2),
+    tp_pips DECIMAL(10,2),
     opened_at TIMESTAMP NOT NULL,
     closed_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -321,6 +331,57 @@ CREATE INDEX idx_trades_closed_at ON trades(closed_at);
 
 ---
 
+### 3.7 pending_orders（予約注文）
+
+未約定の指値・逆指値注文を管理する。
+
+| カラム名 | データ型 | NULL | デフォルト | 説明 |
+|----------|----------|------|------------|------|
+| id | UUID | NO | gen_random_uuid() | 主キー |
+| simulation_id | UUID | NO | - | シミュレーションID（外部キー） |
+| order_type | VARCHAR(10) | NO | - | 注文タイプ（limit, stop） |
+| side | VARCHAR(10) | NO | - | 売買方向（buy, sell） |
+| lot_size | DECIMAL(10,2) | NO | - | ロットサイズ |
+| trigger_price | DECIMAL(10,5) | NO | - | トリガー価格（約定価格） |
+| status | VARCHAR(20) | NO | 'pending' | 状態（pending, executed, cancelled） |
+| created_at | TIMESTAMP | NO | CURRENT_TIMESTAMP | 作成日時 |
+| executed_at | TIMESTAMP | YES | - | 約定日時 |
+| updated_at | TIMESTAMP | NO | CURRENT_TIMESTAMP | 更新日時 |
+
+**インデックス**
+| インデックス名 | カラム | 種類 | 説明 |
+|----------------|--------|------|------|
+| pk_pending_orders | id | PRIMARY KEY | 主キー |
+| idx_pending_orders_simulation_id | simulation_id | INDEX | シミュレーション検索用 |
+| idx_pending_orders_status | status | INDEX | 状態検索用 |
+| idx_pending_orders_simulation_status | simulation_id, status | INDEX | 未約定注文検索用 |
+
+**DDL**
+```sql
+CREATE TABLE pending_orders (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    simulation_id UUID NOT NULL,
+    order_type VARCHAR(10) NOT NULL,
+    side VARCHAR(10) NOT NULL,
+    lot_size DECIMAL(10,2) NOT NULL,
+    trigger_price DECIMAL(10,5) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    executed_at TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_pending_orders_simulation FOREIGN KEY (simulation_id) REFERENCES simulations(id) ON DELETE CASCADE,
+    CONSTRAINT chk_pending_orders_type CHECK (order_type IN ('limit', 'stop')),
+    CONSTRAINT chk_pending_orders_side CHECK (side IN ('buy', 'sell')),
+    CONSTRAINT chk_pending_orders_status CHECK (status IN ('pending', 'executed', 'cancelled'))
+);
+
+CREATE INDEX idx_pending_orders_simulation_id ON pending_orders(simulation_id);
+CREATE INDEX idx_pending_orders_status ON pending_orders(status);
+CREATE INDEX idx_pending_orders_simulation_status ON pending_orders(simulation_id, status);
+```
+
+---
+
 ## 4. データ量見積もり
 
 | テーブル | 想定レコード数 | 1レコードサイズ | 想定データサイズ |
@@ -329,8 +390,9 @@ CREATE INDEX idx_trades_closed_at ON trades(closed_at);
 | simulations | 1,000件 | 約200バイト | 約200KB |
 | accounts | 1,000件 | 約100バイト | 約100KB |
 | orders | 10万件 | 約150バイト | 約15MB |
-| positions | 10万件 | 約200バイト | 約20MB |
+| positions | 10万件 | 約250バイト | 約25MB |
 | trades | 10万件 | 約250バイト | 約25MB |
+| pending_orders | 1万件 | 約180バイト | 約1.8MB |
 
 **備考**
 - candlesテーブルが最も大きくなる（過去10年分のデータを想定）

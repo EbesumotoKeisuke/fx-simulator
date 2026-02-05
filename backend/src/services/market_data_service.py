@@ -211,3 +211,25 @@ class MarketDataService:
             .first()
         )
         return float(candle.close) if candle else None
+
+    def get_candle_at_time(self, timeframe: str, current_time: datetime):
+        """
+        指定時刻のローソク足（OHLC）を取得する
+
+        予約注文の約定チェックに使用。
+        指定時刻以前の最新のローソク足を返す。
+
+        Args:
+            timeframe (str): 時間足（'W1', 'D1', 'H1', 'M10'）
+            current_time (datetime): シミュレーション時刻
+
+        Returns:
+            Optional[Candle]: ローソク足オブジェクト、データがない場合はNone
+        """
+        return (
+            self.db.query(Candle)
+            .filter(Candle.timeframe == timeframe)
+            .filter(Candle.timestamp <= current_time)
+            .order_by(Candle.timestamp.desc())
+            .first()
+        )

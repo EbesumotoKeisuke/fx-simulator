@@ -24,6 +24,7 @@ from src.models.simulation import Simulation
 from src.models.account import Account
 from src.models.position import Position
 from src.models.trade import Trade
+from src.models.pending_order import PendingOrder
 from src.services.trading_service import TradingService
 
 
@@ -141,54 +142,73 @@ class SimulationService:
                 - profit_loss (float): 確定損益
                 エラー時は {"error": "エラーメッセージ"}
         """
-        simulation = self.get_active_simulation()
-        if not simulation:
+        try:
+            simulation = self.get_active_simulation()
+            if not simulation:
+                return {
+                    "error": "No active simulation",
+                }
+
+            # 全ての保有ポジションを自動的にクローズする（ステータス変更前）
+            from src.services.trading_service import TradingService
+            trading_service = TradingService(self.db)
+            open_positions = (
+                self.db.query(Position)
+                .filter(Position.simulation_id == simulation.id)
+                .filter(Position.status == "open")
+                .all()
+            )
+
+            for position in open_positions:
+                try:
+                    trading_service.close_position(str(position.id))
+                except Exception as e:
+                    # ポジションクローズに失敗してもシミュレーション終了は継続
+                    print(f"Failed to close position {position.id}: {e}")
+
+            # 全ての未約定注文を自動的にキャンセルする（ステータス変更前）
+            pending_orders = (
+                self.db.query(PendingOrder)
+                .filter(PendingOrder.simulation_id == simulation.id)
+                .filter(PendingOrder.status == "pending")
+                .all()
+            )
+
+            for pending_order in pending_orders:
+                pending_order.status = "cancelled"
+                pending_order.updated_at = datetime.utcnow()
+
+            simulation.status = "stopped"
+            simulation.end_time = datetime.utcnow()
+
+            # 口座情報を取得
+            account = (
+                self.db.query(Account)
+                .filter(Account.simulation_id == simulation.id)
+                .first()
+            )
+
+            # トレード数を取得
+            trade_count = (
+                self.db.query(Trade)
+                .filter(Trade.simulation_id == simulation.id)
+                .count()
+            )
+
+            self.db.commit()
+
             return {
-                "error": "No active simulation",
+                "simulation_id": str(simulation.id),
+                "status": simulation.status,
+                "final_balance": float(account.balance) if account else 0,
+                "total_trades": trade_count,
+                "profit_loss": float(account.realized_pnl) if account else 0,
             }
-
-        # 全ての保有ポジションを自動的にクローズする（ステータス変更前）
-        trading_service = TradingService(self.db)
-        open_positions = (
-            self.db.query(Position)
-            .filter(Position.simulation_id == simulation.id)
-            .filter(Position.status == "open")
-            .all()
-        )
-
-        for position in open_positions:
-            try:
-                trading_service.close_position(str(position.id))
-            except Exception as e:
-                # ポジションクローズに失敗してもシミュレーション終了は継続
-                print(f"Failed to close position {position.id}: {e}")
-
-        simulation.status = "stopped"
-        simulation.end_time = datetime.utcnow()
-
-        # 口座情報を取得
-        account = (
-            self.db.query(Account)
-            .filter(Account.simulation_id == simulation.id)
-            .first()
-        )
-
-        # トレード数を取得
-        trade_count = (
-            self.db.query(Trade)
-            .filter(Trade.simulation_id == simulation.id)
-            .count()
-        )
-
-        self.db.commit()
-
-        return {
-            "simulation_id": str(simulation.id),
-            "status": simulation.status,
-            "final_balance": float(account.balance) if account else 0,
-            "total_trades": trade_count,
-            "profit_loss": float(account.realized_pnl) if account else 0,
-        }
+        except Exception as e:
+            print(f"Error in stop(): {e}")
+            import traceback
+            traceback.print_exc()
+            return {"error": str(e)}
 
     def pause(self) -> dict:
         """
@@ -339,11 +359,21 @@ class SimulationService:
             return {"error": "Simulation is not running"}
 
         simulation.current_time = new_time
+
+        # 予約注文の約定チェックを実行
+        trading_service = TradingService(self.db)
+        trading_service.check_pending_orders_execution(str(simulation.id), new_time)
+
+        # SL/TPの判定を実行
+        sltp_result = trading_service.check_sltp_triggers(str(simulation.id), new_time)
+
         self.db.commit()
 
         return {
             "simulation_id": str(simulation.id),
             "current_time": simulation.current_time.isoformat(),
+            "sltp_triggered": sltp_result.get("triggered_positions", []),
+            "sltp_conflicts": sltp_result.get("conflict_positions", []),
         }
 
     def get_current_time(self) -> Optional[datetime]:

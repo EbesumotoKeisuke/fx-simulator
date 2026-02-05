@@ -23,6 +23,7 @@ from src.models.account import Account
 from src.models.order import Order
 from src.models.position import Position
 from src.models.trade import Trade
+from src.models.pending_order import PendingOrder
 from src.services.market_data_service import MarketDataService
 
 
@@ -172,7 +173,15 @@ class TradingService:
 
         return total_margin
 
-    def create_order(self, side: str, lot_size: float) -> dict:
+    def create_order(
+        self,
+        side: str,
+        lot_size: float,
+        sl_price: Optional[float] = None,
+        tp_price: Optional[float] = None,
+        sl_pips: Optional[float] = None,
+        tp_pips: Optional[float] = None,
+    ) -> dict:
         """
         成行注文を作成する
 
@@ -182,6 +191,10 @@ class TradingService:
         Args:
             side (str): 'buy'（買い）または 'sell'（売り）
             lot_size (float): ロットサイズ（0.01〜1.0）
+            sl_price (float, optional): 損切り価格（絶対価格）
+            tp_price (float, optional): 利確価格（絶対価格）
+            sl_pips (float, optional): 損切りpips（エントリー価格からの相対値）
+            tp_pips (float, optional): 利確pips（エントリー価格からの相対値）
 
         Returns:
             dict: 注文結果を含む辞書
@@ -244,6 +257,38 @@ class TradingService:
             status="open",
             opened_at=simulation.current_time,
         )
+
+        # SL/TP設定
+        if sl_price is not None:
+            position.sl_price = Decimal(str(sl_price))
+            # sl_priceからsl_pipsを計算
+            if side == "buy":
+                position.sl_pips = Decimal(str((sl_price - current_price) / PIPS_UNIT))
+            else:
+                position.sl_pips = Decimal(str((current_price - sl_price) / PIPS_UNIT))
+        elif sl_pips is not None:
+            position.sl_pips = Decimal(str(sl_pips))
+            # sl_pipsからsl_priceを計算
+            if side == "buy":
+                position.sl_price = Decimal(str(current_price + (sl_pips * PIPS_UNIT)))
+            else:
+                position.sl_price = Decimal(str(current_price - (sl_pips * PIPS_UNIT)))
+
+        if tp_price is not None:
+            position.tp_price = Decimal(str(tp_price))
+            # tp_priceからtp_pipsを計算
+            if side == "buy":
+                position.tp_pips = Decimal(str((tp_price - current_price) / PIPS_UNIT))
+            else:
+                position.tp_pips = Decimal(str((current_price - tp_price) / PIPS_UNIT))
+        elif tp_pips is not None:
+            position.tp_pips = Decimal(str(tp_pips))
+            # tp_pipsからtp_priceを計算
+            if side == "buy":
+                position.tp_price = Decimal(str(current_price + (tp_pips * PIPS_UNIT)))
+            else:
+                position.tp_price = Decimal(str(current_price - (tp_pips * PIPS_UNIT)))
+
         self.db.add(position)
         self.db.commit()
 
@@ -254,6 +299,8 @@ class TradingService:
             "lot_size": lot_size,
             "entry_price": current_price,
             "executed_at": order.executed_at.isoformat(),
+            "sl_price": float(position.sl_price) if position.sl_price else None,
+            "tp_price": float(position.tp_price) if position.tp_price else None,
         }
 
     def get_orders(self, limit: int = 50, offset: int = 0) -> dict:
@@ -355,6 +402,10 @@ class TradingService:
                 "current_price": current_price,
                 "unrealized_pnl": round(unrealized_pnl, 2),
                 "unrealized_pnl_pips": round(unrealized_pnl_pips, 1),
+                "sl_price": float(p.sl_price) if p.sl_price else None,
+                "tp_price": float(p.tp_price) if p.tp_price else None,
+                "sl_pips": float(p.sl_pips) if p.sl_pips else None,
+                "tp_pips": float(p.tp_pips) if p.tp_pips else None,
                 "opened_at": p.opened_at.isoformat(),
             })
 
@@ -564,3 +615,552 @@ class TradingService:
             "limit": limit,
             "offset": offset,
         }
+
+    def create_pending_order(
+        self, order_type: str, side: str, lot_size: float, trigger_price: float
+    ) -> dict:
+        """
+        予約注文（指値・逆指値）を作成する
+
+        Args:
+            order_type (str): 'limit'（指値）または 'stop'（逆指値）
+            side (str): 'buy'（買い）または 'sell'（売り）
+            lot_size (float): ロットサイズ（0.01〜100.0）
+            trigger_price (float): トリガー価格
+
+        Returns:
+            dict: 予約注文結果を含む辞書
+                エラー時は {"error": "エラーメッセージ"}
+        """
+        simulation = self._get_active_simulation()
+        if not simulation:
+            return {"error": "No active simulation"}
+
+        if simulation.status not in ["running", "paused"]:
+            return {"error": "Simulation is not running or paused"}
+
+        # 予約注文を作成
+        pending_order = PendingOrder(
+            simulation_id=simulation.id,
+            order_type=order_type,
+            side=side,
+            lot_size=Decimal(str(lot_size)),
+            trigger_price=Decimal(str(trigger_price)),
+            status="pending",
+        )
+        self.db.add(pending_order)
+        self.db.commit()
+
+        return {
+            "order_id": str(pending_order.id),
+            "order_type": order_type,
+            "side": side,
+            "lot_size": lot_size,
+            "trigger_price": trigger_price,
+            "status": "pending",
+            "created_at": pending_order.created_at.isoformat(),
+        }
+
+    def get_pending_orders(
+        self, limit: int = 50, offset: int = 0, status: Optional[str] = None
+    ) -> dict:
+        """
+        未約定の予約注文一覧を取得する
+
+        Args:
+            limit (int, optional): 取得件数上限。デフォルトは50
+            offset (int, optional): 取得開始位置。デフォルトは0
+            status (str, optional): 状態フィルター（pending, executed, cancelled）
+
+        Returns:
+            dict: 予約注文一覧を含む辞書
+        """
+        # 停止済みのシミュレーションも含む最新のシミュレーションを取得
+        # これにより、終了後の予約注文の確認（cancelledステータスなど）が可能
+        simulation = self._get_latest_simulation()
+        if not simulation:
+            return {"orders": [], "total": 0}
+
+        query = (
+            self.db.query(PendingOrder)
+            .filter(PendingOrder.simulation_id == simulation.id)
+            .order_by(PendingOrder.created_at.desc())
+        )
+
+        if status:
+            query = query.filter(PendingOrder.status == status)
+
+        total = query.count()
+        orders = query.offset(offset).limit(limit).all()
+
+        return {
+            "orders": [
+                {
+                    "order_id": str(o.id),
+                    "order_type": o.order_type,
+                    "side": o.side,
+                    "lot_size": float(o.lot_size),
+                    "trigger_price": float(o.trigger_price),
+                    "status": o.status,
+                    "created_at": o.created_at.isoformat(),
+                }
+                for o in orders
+            ],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+
+    def get_pending_order(self, order_id: str) -> dict:
+        """
+        未約定注文の詳細を取得する
+
+        Args:
+            order_id (str): 注文ID
+
+        Returns:
+            dict: 予約注文詳細を含む辞書
+                エラー時は {"error": "エラーメッセージ"}
+        """
+        simulation = self._get_active_simulation()
+        if not simulation:
+            return {"error": "No active simulation"}
+
+        order = (
+            self.db.query(PendingOrder)
+            .filter(PendingOrder.id == order_id)
+            .filter(PendingOrder.simulation_id == simulation.id)
+            .first()
+        )
+
+        if not order:
+            return {"error": "Pending order not found"}
+
+        return {
+            "order_id": str(order.id),
+            "order_type": order.order_type,
+            "side": order.side,
+            "lot_size": float(order.lot_size),
+            "trigger_price": float(order.trigger_price),
+            "status": order.status,
+            "created_at": order.created_at.isoformat(),
+            "executed_at": order.executed_at.isoformat() if order.executed_at else None,
+            "updated_at": order.updated_at.isoformat(),
+        }
+
+    def update_pending_order(
+        self,
+        order_id: str,
+        lot_size: Optional[float] = None,
+        trigger_price: Optional[float] = None,
+    ) -> dict:
+        """
+        未約定注文の内容を変更する
+
+        Args:
+            order_id (str): 注文ID
+            lot_size (float, optional): 新しいロットサイズ
+            trigger_price (float, optional): 新しいトリガー価格
+
+        Returns:
+            dict: 更新後の予約注文を含む辞書
+                エラー時は {"error": "エラーメッセージ"}
+        """
+        simulation = self._get_active_simulation()
+        if not simulation:
+            return {"error": "No active simulation"}
+
+        order = (
+            self.db.query(PendingOrder)
+            .filter(PendingOrder.id == order_id)
+            .filter(PendingOrder.simulation_id == simulation.id)
+            .filter(PendingOrder.status == "pending")
+            .first()
+        )
+
+        if not order:
+            return {"error": "Pending order not found or already executed/cancelled"}
+
+        # 更新
+        if lot_size is not None:
+            order.lot_size = Decimal(str(lot_size))
+        if trigger_price is not None:
+            order.trigger_price = Decimal(str(trigger_price))
+
+        order.updated_at = datetime.now()
+        self.db.commit()
+
+        return {
+            "order_id": str(order.id),
+            "order_type": order.order_type,
+            "side": order.side,
+            "lot_size": float(order.lot_size),
+            "trigger_price": float(order.trigger_price),
+            "status": order.status,
+            "updated_at": order.updated_at.isoformat(),
+        }
+
+    def cancel_pending_order(self, order_id: str) -> dict:
+        """
+        未約定注文をキャンセルする
+
+        Args:
+            order_id (str): 注文ID
+
+        Returns:
+            dict: キャンセル結果を含む辞書
+                エラー時は {"error": "エラーメッセージ"}
+        """
+        simulation = self._get_active_simulation()
+        if not simulation:
+            return {"error": "No active simulation"}
+
+        order = (
+            self.db.query(PendingOrder)
+            .filter(PendingOrder.id == order_id)
+            .filter(PendingOrder.simulation_id == simulation.id)
+            .filter(PendingOrder.status == "pending")
+            .first()
+        )
+
+        if not order:
+            return {"error": "Pending order not found or already executed/cancelled"}
+
+        # キャンセル
+        order.status = "cancelled"
+        order.updated_at = datetime.now()
+        self.db.commit()
+
+        return {
+            "order_id": str(order.id),
+            "status": "cancelled",
+            "cancelled_at": order.updated_at.isoformat(),
+        }
+
+    def check_pending_orders_execution(self, simulation_id: str, current_time: datetime):
+        """
+        未約定注文の約定チェックを行う
+
+        シミュレーション時刻が更新されるたびに呼ばれ、
+        10分足ローソク足のOHLCを使って約定条件を満たす予約注文を執行する。
+
+        Args:
+            simulation_id (str): シミュレーションID
+            current_time (datetime): 現在のシミュレーション時刻
+        """
+        # pending状態の予約注文を取得
+        pending_orders = (
+            self.db.query(PendingOrder)
+            .filter(PendingOrder.simulation_id == simulation_id)
+            .filter(PendingOrder.status == "pending")
+            .all()
+        )
+
+        if not pending_orders:
+            return
+
+        # 現在時刻の10分足ローソク足を取得
+        candle = self.market_data_service.get_candle_at_time("M10", current_time)
+        if not candle:
+            return
+
+        open_price = float(candle.open)
+        high_price = float(candle.high)
+        low_price = float(candle.low)
+        close_price = float(candle.close)
+
+        for pending_order in pending_orders:
+            trigger_price = float(pending_order.trigger_price)
+            should_execute = False
+
+            # 約定条件チェック
+            if pending_order.order_type == "limit":
+                if pending_order.side == "buy":
+                    # 指値買い: 安値がトリガー価格以下
+                    should_execute = low_price <= trigger_price
+                else:  # sell
+                    # 指値売り: 高値がトリガー価格以上
+                    should_execute = high_price >= trigger_price
+            else:  # stop
+                if pending_order.side == "buy":
+                    # 逆指値買い: 高値がトリガー価格以上
+                    should_execute = high_price >= trigger_price
+                else:  # sell
+                    # 逆指値売り: 安値がトリガー価格以下
+                    should_execute = low_price <= trigger_price
+
+            if should_execute:
+                # 注文を作成
+                order = Order(
+                    simulation_id=simulation_id,
+                    side=pending_order.side,
+                    lot_size=pending_order.lot_size,
+                    entry_price=pending_order.trigger_price,
+                    executed_at=current_time,
+                )
+                self.db.add(order)
+                self.db.flush()
+
+                # ポジションを作成
+                position = Position(
+                    simulation_id=simulation_id,
+                    order_id=order.id,
+                    side=pending_order.side,
+                    lot_size=pending_order.lot_size,
+                    entry_price=pending_order.trigger_price,
+                    status="open",
+                    opened_at=current_time,
+                )
+                self.db.add(position)
+
+                # 予約注文を実行済みに変更
+                pending_order.status = "executed"
+                pending_order.executed_at = current_time
+                pending_order.updated_at = current_time
+
+        self.db.commit()
+
+    def set_sltp(
+        self,
+        position_id: str,
+        sl_price: Optional[float] = None,
+        tp_price: Optional[float] = None,
+        sl_pips: Optional[float] = None,
+        tp_pips: Optional[float] = None,
+    ) -> dict:
+        """
+        ポジションにSL/TPを設定する
+
+        Args:
+            position_id (str): ポジションID
+            sl_price (float, optional): 損切り価格（絶対価格）
+            tp_price (float, optional): 利確価格（絶対価格）
+            sl_pips (float, optional): 損切りpips（エントリー価格からの相対値）
+            tp_pips (float, optional): 利確pips（エントリー価格からの相対値）
+
+        Returns:
+            dict: 設定結果を含む辞書
+                エラー時は {"error": "エラーメッセージ"}
+        """
+        simulation = self._get_active_simulation()
+        if not simulation:
+            return {"error": "No active simulation"}
+
+        position = (
+            self.db.query(Position)
+            .filter(Position.id == position_id)
+            .filter(Position.simulation_id == simulation.id)
+            .filter(Position.status == "open")
+            .first()
+        )
+
+        if not position:
+            return {"error": "Position not found or already closed"}
+
+        # sl_priceとsl_pipsが両方指定されている場合はエラー
+        if sl_price is not None and sl_pips is not None:
+            return {"error": "Cannot specify both sl_price and sl_pips"}
+
+        # tp_priceとtp_pipsが両方指定されている場合はエラー
+        if tp_price is not None and tp_pips is not None:
+            return {"error": "Cannot specify both tp_price and tp_pips"}
+
+        entry_price = float(position.entry_price)
+
+        # SL設定
+        if sl_price is not None:
+            position.sl_price = Decimal(str(sl_price))
+            # sl_priceからsl_pipsを計算
+            if position.side == "buy":
+                position.sl_pips = Decimal(str((sl_price - entry_price) / PIPS_UNIT))
+            else:
+                position.sl_pips = Decimal(str((entry_price - sl_price) / PIPS_UNIT))
+        elif sl_pips is not None:
+            position.sl_pips = Decimal(str(sl_pips))
+            # sl_pipsからsl_priceを計算
+            if position.side == "buy":
+                position.sl_price = Decimal(str(entry_price + (sl_pips * PIPS_UNIT)))
+            else:
+                position.sl_price = Decimal(str(entry_price - (sl_pips * PIPS_UNIT)))
+        else:
+            # nullを指定してSLを削除
+            position.sl_price = None
+            position.sl_pips = None
+
+        # TP設定
+        if tp_price is not None:
+            position.tp_price = Decimal(str(tp_price))
+            # tp_priceからtp_pipsを計算
+            if position.side == "buy":
+                position.tp_pips = Decimal(str((tp_price - entry_price) / PIPS_UNIT))
+            else:
+                position.tp_pips = Decimal(str((entry_price - tp_price) / PIPS_UNIT))
+        elif tp_pips is not None:
+            position.tp_pips = Decimal(str(tp_pips))
+            # tp_pipsからtp_priceを計算
+            if position.side == "buy":
+                position.tp_price = Decimal(str(entry_price + (tp_pips * PIPS_UNIT)))
+            else:
+                position.tp_price = Decimal(str(entry_price - (tp_pips * PIPS_UNIT)))
+        else:
+            # nullを指定してTPを削除
+            position.tp_price = None
+            position.tp_pips = None
+
+        self.db.commit()
+
+        return {
+            "position_id": str(position.id),
+            "sl_price": float(position.sl_price) if position.sl_price else None,
+            "tp_price": float(position.tp_price) if position.tp_price else None,
+            "sl_pips": float(position.sl_pips) if position.sl_pips else None,
+            "tp_pips": float(position.tp_pips) if position.tp_pips else None,
+            "updated_at": datetime.now().isoformat(),
+        }
+
+    def check_sltp_triggers(self, simulation_id: str, current_time: datetime):
+        """
+        SL/TPの判定を行う
+
+        シミュレーション時刻が更新されるたびに呼ばれ、
+        10分足ローソク足のOHLCを使ってSL/TPの発動条件を満たすポジションを決済する。
+
+        同一ローソク足でSLとTPの両方が満たされた場合は、エラーを返す。
+
+        Args:
+            simulation_id (str): シミュレーションID
+            current_time (datetime): 現在のシミュレーション時刻
+
+        Returns:
+            dict: 判定結果
+                - triggered_positions (list): 発動したポジションのリスト
+                - conflict_positions (list): SLとTPが同時発動したポジションのリスト（ユーザー選択が必要）
+        """
+        # オープン状態でSLまたはTPが設定されているポジションを取得
+        positions = (
+            self.db.query(Position)
+            .filter(Position.simulation_id == simulation_id)
+            .filter(Position.status == "open")
+            .filter((Position.sl_price.isnot(None)) | (Position.tp_price.isnot(None)))
+            .all()
+        )
+
+        if not positions:
+            return {"triggered_positions": [], "conflict_positions": []}
+
+        # 現在時刻の10分足ローソク足を取得
+        candle = self.market_data_service.get_candle_at_time("M10", current_time)
+        if not candle:
+            return {"triggered_positions": [], "conflict_positions": []}
+
+        open_price = float(candle.open)
+        high_price = float(candle.high)
+        low_price = float(candle.low)
+        close_price = float(candle.close)
+
+        triggered_positions = []
+        conflict_positions = []
+
+        for position in positions:
+            sl_triggered = False
+            tp_triggered = False
+
+            # SL判定
+            if position.sl_price:
+                sl_price = float(position.sl_price)
+                if position.side == "buy":
+                    # 買いポジションのSL: 安値がSL価格以下
+                    sl_triggered = low_price <= sl_price
+                else:  # sell
+                    # 売りポジションのSL: 高値がSL価格以上
+                    sl_triggered = high_price >= sl_price
+
+            # TP判定
+            if position.tp_price:
+                tp_price = float(position.tp_price)
+                if position.side == "buy":
+                    # 買いポジションのTP: 高値がTP価格以上
+                    tp_triggered = high_price >= tp_price
+                else:  # sell
+                    # 売りポジションのTP: 安値がTP価格以下
+                    tp_triggered = low_price <= tp_price
+
+            # 同時発動チェック
+            if sl_triggered and tp_triggered:
+                conflict_positions.append({
+                    "position_id": str(position.id),
+                    "side": position.side,
+                    "entry_price": float(position.entry_price),
+                    "sl_price": float(position.sl_price) if position.sl_price else None,
+                    "tp_price": float(position.tp_price) if position.tp_price else None,
+                })
+            elif sl_triggered:
+                # SL発動 - ポジションを決済
+                exit_price = float(position.sl_price)
+                self._close_position_with_price(position, exit_price, current_time)
+                triggered_positions.append({
+                    "position_id": str(position.id),
+                    "trigger_type": "sl",
+                    "exit_price": exit_price,
+                })
+            elif tp_triggered:
+                # TP発動 - ポジションを決済
+                exit_price = float(position.tp_price)
+                self._close_position_with_price(position, exit_price, current_time)
+                triggered_positions.append({
+                    "position_id": str(position.id),
+                    "trigger_type": "tp",
+                    "exit_price": exit_price,
+                })
+
+        if triggered_positions or conflict_positions:
+            self.db.commit()
+
+        return {
+            "triggered_positions": triggered_positions,
+            "conflict_positions": conflict_positions,
+        }
+
+    def _close_position_with_price(self, position: Position, exit_price: float, current_time: datetime):
+        """
+        指定された価格でポジションを決済する（内部メソッド）
+
+        Args:
+            position (Position): 決済するポジション
+            exit_price (float): 決済価格
+            current_time (datetime): 決済時刻
+        """
+        entry_price = float(position.entry_price)
+
+        # 損益計算
+        if position.side == "buy":
+            pnl_pips = (exit_price - entry_price) / PIPS_UNIT
+        else:
+            pnl_pips = (entry_price - exit_price) / PIPS_UNIT
+
+        realized_pnl = pnl_pips * float(position.lot_size) * LOT_UNIT * PIPS_UNIT
+
+        # ポジションを閉じる
+        position.status = "closed"
+        position.closed_at = current_time
+
+        # トレード履歴を作成
+        trade = Trade(
+            simulation_id=position.simulation_id,
+            position_id=position.id,
+            side=position.side,
+            lot_size=position.lot_size,
+            entry_price=position.entry_price,
+            exit_price=Decimal(str(exit_price)),
+            realized_pnl=Decimal(str(round(realized_pnl, 2))),
+            realized_pnl_pips=Decimal(str(round(pnl_pips, 1))),
+            opened_at=position.opened_at,
+            closed_at=current_time,
+        )
+        self.db.add(trade)
+
+        # 口座残高を更新
+        account = self._get_account(position.simulation_id)
+        if account:
+            account.balance += Decimal(str(round(realized_pnl, 2)))
+            account.realized_pnl += Decimal(str(round(realized_pnl, 2)))

@@ -3,7 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import Header from '../components/Header'
 import ChartPanel from '../components/ChartPanel'
 import ControlBar from '../components/ControlBar'
+import OrderPanel from '../components/OrderPanel'
 import PositionPanel from '../components/PositionPanel'
+import PendingOrderPanel from '../components/PendingOrderPanel'
 import AccountInfo from '../components/AccountInfo'
 import SimulationSettingsModal from '../components/SimulationSettingsModal'
 import SimulationResultModal from '../components/SimulationResultModal'
@@ -176,6 +178,10 @@ function MainPage() {
     navigate('/data')
   }
 
+  const handleAnalysis = () => {
+    navigate('/analysis')
+  }
+
   const handleSettings = () => {
     setIsSettingsOpen(true)
   }
@@ -231,6 +237,7 @@ function MainPage() {
         currentTime={currentTime || new Date()}
         status={status}
         onDataManagement={handleDataManagement}
+        onAnalysis={handleAnalysis}
         onSettings={handleSettings}
         onStart={handleStart}
         onEnd={handleEnd}
@@ -316,17 +323,23 @@ function MainPage() {
         />
       </div>
 
-      {/* Resizable bottom section (Control Bar + Position & Account) */}
-      <div className="resize-y overflow-auto border-t-2 border-border flex flex-col" style={{ height: '360px', minHeight: '200px', maxHeight: '600px' }}>
+      {/* Resizable bottom section (Control Bar + Order Panel + Position & Account) */}
+      <div className="resize-y border-t-2 border-border flex flex-col" style={{ height: '400px', minHeight: '250px', maxHeight: '650px' }}>
         {/* Control Bar */}
         <ControlBar currentPrice={currentPrice} onRefresh={handleRefresh} />
 
-        {/* Position & Account */}
-        <div className="flex-1 grid grid-cols-3 gap-2 p-2">
-          <div className="col-span-2">
+        {/* Order Panel */}
+        <OrderPanel currentPrice={currentPrice} onRefresh={handleRefresh} />
+
+        {/* Position, Pending Orders & Account */}
+        <div className="flex-1 grid grid-cols-10 gap-2 p-2 overflow-hidden">
+          <div className="col-span-4 overflow-hidden">
             <PositionPanel refreshTrigger={refreshTrigger} />
           </div>
-          <div>
+          <div className="col-span-3 overflow-hidden">
+            <PendingOrderPanel refreshTrigger={refreshTrigger} />
+          </div>
+          <div className="col-span-3 overflow-auto">
             <AccountInfo refreshTrigger={refreshTrigger} />
           </div>
         </div>

@@ -10,7 +10,25 @@
       "Bash(npm run dev:*)",
       "Bash(npx tsc:*)",
       "Bash(npm run build:*)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(python:*)",
+      "Bash(if [ -d \".venv\" ])",
+      "Bash(then echo \"仮想環境が存在します\")",
+      "Bash(source .venv/Scripts/activate)",
+      "Bash(else echo \"仮想環境が見つかりません\")",
+      "Bash(fi)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(tasklist:*)",
+      "Bash(taskkill //F //PID 13272)",
+      "Bash(cmd.exe //c clear_cache.bat)",
+      "Bash(taskkill //F //PID 25124)",
+      "Bash(taskkill:*)",
+      "Bash(ls:*)",
+      "Bash(docker exec:*)",
+      "Bash(docker restart:*)",
+      "Bash(pip install:*)",
+      "Bash(npm install:*)"
     ]
   }
 }
