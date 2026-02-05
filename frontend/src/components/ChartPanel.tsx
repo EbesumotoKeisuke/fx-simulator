@@ -143,6 +143,8 @@ function ChartPanel({
   const lastUpdateTimeRef = useRef<Date | null>(null)
   // カスタムクロスヘアライン位置（他のチャートから同期）
   const [crosshairPosition, setCrosshairPosition] = useState<{ x: number; y: number } | null>(null)
+  // データ取得中フラグ（複数リクエストの同時実行を防ぐ）
+  const isFetchingRef = useRef(false)
 
   /**
    * Convert a Date to fakeUTC timestamp (same logic as formatCandles)
@@ -269,7 +271,13 @@ function ChartPanel({
   const fetchData = useCallback(async () => {
     // seriesRefが設定されるまで待つ
     if (!seriesRef.current) {
-      console.warn('Series not ready, skipping data fetch')
+      console.warn('[ChartPanel] Series not ready, skipping data fetch')
+      return
+    }
+
+    // 前回のリクエストがまだ完了していない場合はスキップ（競合防止）
+    if (isFetchingRef.current) {
+      console.warn(`[${timeframe}] Skipping data fetch: previous request still in progress`)
       return
     }
 
@@ -280,6 +288,9 @@ function ChartPanel({
         return
       }
     }
+
+    // 取得中フラグをセット
+    isFetchingRef.current = true
 
     try {
       let response
@@ -355,7 +366,10 @@ function ChartPanel({
         }
       }
     } catch (error) {
-      console.error('Failed to fetch candle data:', error)
+      console.error('[ChartPanel] Failed to fetch candle data:', error)
+    } finally {
+      // 取得完了フラグをクリア
+      isFetchingRef.current = false
     }
 
   }, [timeframe, currentTime])

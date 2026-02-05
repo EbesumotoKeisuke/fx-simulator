@@ -45,6 +45,8 @@ function MainPage() {
   const currentTimeRef = useRef<Date | null>(null)
   // ステータスを保持するref（タイマーコールバック内で使用）
   const statusRef = useRef<'idle' | 'created' | 'running' | 'paused' | 'stopped'>('idle')
+  // 時刻更新処理中フラグ（複数リクエストの同時実行を防ぐ）
+  const isAdvancingRef = useRef(false)
 
   const {
     simulationId,
@@ -106,28 +108,40 @@ function MainPage() {
         return
       }
 
+      // 前回の処理がまだ完了していない場合はスキップ（競合防止）
+      if (isAdvancingRef.current) {
+        console.warn('[Timer] Skipping advance_time: previous request still in progress')
+        return
+      }
+
       const current = currentTimeRef.current
       if (!current) return
 
-      // 10分（BASE_TIME_ADVANCE_MS）進める
-      const newTime = new Date(current.getTime() + BASE_TIME_ADVANCE_MS)
+      // 処理中フラグをセット
+      isAdvancingRef.current = true
 
-      // JSTのまま送信するためにローカルISO文字列を作成
-      const year = newTime.getFullYear()
-      const month = String(newTime.getMonth() + 1).padStart(2, '0')
-      const day = String(newTime.getDate()).padStart(2, '0')
-      const hour = String(newTime.getHours()).padStart(2, '0')
-      const minute = String(newTime.getMinutes()).padStart(2, '0')
-      const second = String(newTime.getSeconds()).padStart(2, '0')
-      const localIsoString = `${year}-${month}-${day} ${hour}:${minute}:${second}`
-
-      // バックエンドに時刻更新を通知
       try {
+        // 10分（BASE_TIME_ADVANCE_MS）進める
+        const newTime = new Date(current.getTime() + BASE_TIME_ADVANCE_MS)
+
+        // JSTのまま送信するためにローカルISO文字列を作成
+        const year = newTime.getFullYear()
+        const month = String(newTime.getMonth() + 1).padStart(2, '0')
+        const day = String(newTime.getDate()).padStart(2, '0')
+        const hour = String(newTime.getHours()).padStart(2, '0')
+        const minute = String(newTime.getMinutes()).padStart(2, '0')
+        const second = String(newTime.getSeconds()).padStart(2, '0')
+        const localIsoString = `${year}-${month}-${day} ${hour}:${minute}:${second}`
+
+        // バックエンドに時刻更新を通知
         await simulationApi.advanceTime(localIsoString)
         advanceTime(newTime)
         // チャートはcurrentTimeの変更により自動的にデータを再取得する
       } catch (error) {
         console.error('Failed to advance time:', error)
+      } finally {
+        // 処理完了フラグをクリア
+        isAdvancingRef.current = false
       }
     }, intervalMs)
 

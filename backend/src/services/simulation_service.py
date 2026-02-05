@@ -351,30 +351,50 @@ class SimulationService:
                 - current_time (str): 新しい現在時刻（ISO形式）
                 エラー時は {"error": "エラーメッセージ"}
         """
-        simulation = self.get_active_simulation()
-        if not simulation:
-            return {"error": "No active simulation"}
+        try:
+            simulation = self.get_active_simulation()
+            if not simulation:
+                return {"error": "No active simulation"}
 
-        if simulation.status != "running":
-            return {"error": "Simulation is not running"}
+            if simulation.status != "running":
+                return {"error": "Simulation is not running"}
 
-        simulation.current_time = new_time
+            simulation.current_time = new_time
 
-        # 予約注文の約定チェックを実行
-        trading_service = TradingService(self.db)
-        trading_service.check_pending_orders_execution(str(simulation.id), new_time)
+            # 予約注文の約定チェックを実行
+            trading_service = TradingService(self.db)
+            try:
+                trading_service.check_pending_orders_execution(str(simulation.id), new_time)
+            except Exception as e:
+                print(f"Warning: check_pending_orders_execution failed: {e}")
+                import traceback
+                traceback.print_exc()
+                # 予約注文チェックが失敗しても処理を継続
 
-        # SL/TPの判定を実行
-        sltp_result = trading_service.check_sltp_triggers(str(simulation.id), new_time)
+            # SL/TPの判定を実行
+            sltp_result = {"triggered_positions": [], "conflict_positions": []}
+            try:
+                sltp_result = trading_service.check_sltp_triggers(str(simulation.id), new_time)
+            except Exception as e:
+                print(f"Warning: check_sltp_triggers failed: {e}")
+                import traceback
+                traceback.print_exc()
+                # SL/TPチェックが失敗しても処理を継続
 
-        self.db.commit()
+            self.db.commit()
 
-        return {
-            "simulation_id": str(simulation.id),
-            "current_time": simulation.current_time.isoformat(),
-            "sltp_triggered": sltp_result.get("triggered_positions", []),
-            "sltp_conflicts": sltp_result.get("conflict_positions", []),
-        }
+            return {
+                "simulation_id": str(simulation.id),
+                "current_time": simulation.current_time.isoformat(),
+                "sltp_triggered": sltp_result.get("triggered_positions", []),
+                "sltp_conflicts": sltp_result.get("conflict_positions", []),
+            }
+        except Exception as e:
+            print(f"Error in advance_time(): {e}")
+            import traceback
+            traceback.print_exc()
+            self.db.rollback()
+            return {"error": str(e)}
 
     def get_current_time(self) -> Optional[datetime]:
         """
