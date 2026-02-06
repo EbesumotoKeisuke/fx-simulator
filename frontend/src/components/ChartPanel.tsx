@@ -23,7 +23,12 @@ const getISOWeek = (date: Date): number => {
 /**
  * ローソク足の境界を越えたかをチェックする関数
  *
- * @param timeframe タイムフレーム
+ * F-002: リアルタイムローソク足更新機能
+ * 10分足の境界を越えたときに全時間足を更新する。
+ * これにより、上位時間足（H1, D1, W1）の最新のローソク足が
+ * 10分足が更新されるたびにリアルタイムで更新される。
+ *
+ * @param timeframe タイムフレーム（参照用、実際の判定には使用しない）
  * @param lastTime 前回の更新時刻
  * @param currentTime 現在の時刻
  * @returns 境界を越えた場合はtrue
@@ -33,41 +38,12 @@ const shouldUpdateCandle = (
   lastTime: Date,
   currentTime: Date
 ): boolean => {
-  switch (timeframe) {
-    case 'M10': {
-      // 10分の境界を越えたかチェック
-      // 例: 9:05 → 9:10, 9:20 → 9:30
-      const lastM10 = Math.floor(lastTime.getTime() / (10 * 60 * 1000))
-      const currentM10 = Math.floor(currentTime.getTime() / (10 * 60 * 1000))
-      return currentM10 > lastM10
-    }
-    case 'H1': {
-      // 時間が変わったかチェック
-      // 例: 9時 → 10時
-      return (
-        lastTime.getFullYear() !== currentTime.getFullYear() ||
-        lastTime.getMonth() !== currentTime.getMonth() ||
-        lastTime.getDate() !== currentTime.getDate() ||
-        lastTime.getHours() !== currentTime.getHours()
-      )
-    }
-    case 'D1': {
-      // 日付が変わったかチェック
-      // 例: 1日 → 2日
-      return (
-        lastTime.getFullYear() !== currentTime.getFullYear() ||
-        lastTime.getMonth() !== currentTime.getMonth() ||
-        lastTime.getDate() !== currentTime.getDate()
-      )
-    }
-    case 'W1': {
-      // 週が変わったかチェック（ISO週番号を使用）
-      // 例: 2024年第1週 → 2024年第2週
-      const lastWeek = getISOWeek(lastTime)
-      const currentWeek = getISOWeek(currentTime)
-      return currentWeek > lastWeek
-    }
-  }
+  // 全時間足で10分足の境界を跨いだかチェック
+  // 例: 9:05 → 9:10, 9:20 → 9:30
+  // 時間が変わった場合も10分境界を跨いだとみなす
+  const lastM10 = Math.floor(lastTime.getTime() / (10 * 60 * 1000))
+  const currentM10 = Math.floor(currentTime.getTime() / (10 * 60 * 1000))
+  return currentM10 > lastM10
 }
 
 /**

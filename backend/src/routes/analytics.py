@@ -86,3 +86,90 @@ async def get_ai_feedback(
         status_code=501,
         detail="AI feedback retrieval is not implemented yet. This feature will be available in a future release.",
     )
+
+
+@router.get("/trades-with-candles")
+async def get_trades_with_candles(
+    timeframe: Literal["W1", "D1", "H1", "M10"] = Query("H1", description="時間足"),
+    db: Session = Depends(get_db),
+):
+    """
+    売買履歴とローソク足データを一緒に取得する（パフォーマンス分析用）
+
+    F-003: パフォーマンス分析へのチャート表示機能
+    売買履歴の時間範囲に対応するローソク足データを取得し、
+    チャート上に売買履歴をマーカーとして表示するために使用する。
+
+    Args:
+        timeframe: 時間足（W1, D1, H1, M10）
+        db: データベースセッション
+
+    Returns:
+        dict: {
+            "trades": 売買履歴のリスト,
+            "candles": ローソク足データのリスト,
+            "timeframe": 時間足,
+            "start_time": 売買履歴の開始時刻,
+            "end_time": 売買履歴の終了時刻
+        }
+    """
+    from src.services.trading_service import TradingService
+    from src.services.market_data_service import MarketDataService
+    from datetime import datetime
+
+    trading_service = TradingService(db)
+    market_service = MarketDataService(db)
+
+    # 売買履歴を取得
+    trades_result = trading_service.get_trades(limit=10000, offset=0)
+    trades = trades_result.get("trades", [])
+
+    if not trades:
+        return {
+            "success": True,
+            "data": {
+                "trades": [],
+                "candles": [],
+                "timeframe": timeframe,
+                "start_time": None,
+                "end_time": None
+            }
+        }
+
+    # 売買履歴の時間範囲を取得
+    opened_times = [datetime.fromisoformat(t["opened_at"]) for t in trades if t.get("opened_at")]
+    closed_times = [datetime.fromisoformat(t["closed_at"]) for t in trades if t.get("closed_at")]
+
+    if not opened_times or not closed_times:
+        return {
+            "success": True,
+            "data": {
+                "trades": trades,
+                "candles": [],
+                "timeframe": timeframe,
+                "start_time": None,
+                "end_time": None
+            }
+        }
+
+    start_time = min(opened_times)
+    end_time = max(closed_times)
+
+    # ローソク足データを取得（時間範囲を指定）
+    candles = market_service.get_candles(
+        timeframe=timeframe,
+        start_time=start_time,
+        end_time=end_time,
+        limit=10000
+    )
+
+    return {
+        "success": True,
+        "data": {
+            "trades": trades,
+            "candles": candles,
+            "timeframe": timeframe,
+            "start_time": start_time.isoformat(),
+            "end_time": end_time.isoformat()
+        }
+    }

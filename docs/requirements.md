@@ -610,8 +610,769 @@ FX Trade Simulator（FXトレードシミュレーター）
 
 ---
 
+### 9.5 F-002: リアルタイムローソク足更新機能
+
+#### 現状の問題点
+
+**上位時間足の更新タイミングの問題**:
+- 現在の実装では、ローソク足の境界を跨いだときのみチャートデータを再取得している
+- 1時間足は10分足が6本（60分）完成してから更新される
+- 最新のローソク足が部分的に生成される仕組み（F-001）を実装したが、フロントエンドの更新ロジックが追従していない
+- 結果として、10分足が1本更新されても、上位時間足（H1, D1, W1）の最新のローソク足がリアルタイムで更新されない
+
+**具体例**:
+```
+現在時刻: 12:30（10分足が1本完成）
+
+【期待される動作】
+- 10分足: 12:30のローソク足が表示される ✓
+- 1時間足: 12:00台のローソク足が12:00〜12:30のデータで更新される ✗（現状は12:00〜12:00のまま）
+- 日足: 当日のローソク足が7:00〜12:30のデータで更新される ✗（現状は7:00〜12:20のまま）
+
+現在時刻: 12:40（10分足がさらに1本完成）
+
+【期待される動作】
+- 10分足: 12:40のローソク足が表示される ✓
+- 1時間足: 12:00台のローソク足が12:00〜12:40のデータで更新される ✗（現状は12:00〜12:30のまま）
+- 日足: 当日のローソク足が7:00〜12:40のデータで更新される ✗（現状は12:00〜12:30のまま）
+```
+
+#### 修正方針
+
+**基本コンセプト**:
+- 10分足が1本更新されるたびに、上位時間足（H1, D1, W1）の最新のローソク足も更新する
+- バックエンドの`get_candles_with_partial_last()`は既に部分的なローソク足を動的生成しているため、フロントエンドの更新ロジックのみ修正すればよい
+- チャートの再取得を適切なタイミングで実行する
+
+**修正対象**:
+
+1. **ChartPanel.tsxの更新ロジック修正**:
+   - `shouldUpdateCandle()`メソッドを修正、または削除
+   - `currentTime`が変更されたら、常にチャートデータを再取得する
+   - ただし、10分足の境界を跨いだときのみ再取得する（不要な再取得を避ける）
+
+2. **パフォーマンス最適化**:
+   - 10分足が更新されるたびに全時間足のチャートを再取得するため、APIリクエストが増加する
+   - バックエンドでの部分的ローソク足生成は軽量なため、通常の速度（1x〜10x）では問題ない
+   - 必要に応じて、レート制限やデバウンス処理を導入
+
+#### 実装方針
+
+**フロントエンド実装**:
+
+1. **ChartPanel.tsxの修正**:
+   ```typescript
+   // Before: ローソク足の境界を跨いだときのみ更新
+   const shouldUpdateCandle = (prevTime: Date | null, newTime: Date): boolean => {
+     if (!prevTime) return true
+
+     // 時間足に応じた境界判定
+     switch (timeframe) {
+       case 'M10':
+         return prevTime.getHours() !== newTime.getHours() ||
+                Math.floor(prevTime.getMinutes() / 10) !== Math.floor(newTime.getMinutes() / 10)
+       case 'H1':
+         return prevTime.getHours() !== newTime.getHours()
+       case 'D1':
+         return prevTime.getDate() !== newTime.getDate()
+       case 'W1':
+         return getISOWeek(prevTime) !== getISOWeek(newTime)
+     }
+   }
+
+   // After: 10分足の境界を跨いだときに全時間足を更新
+   const shouldUpdateCandle = (prevTime: Date | null, newTime: Date): boolean => {
+     if (!prevTime) return true
+
+     // 10分足の境界を跨いだかチェック（全時間足共通）
+     return prevTime.getHours() !== newTime.getHours() ||
+            Math.floor(prevTime.getMinutes() / 10) !== Math.floor(newTime.getMinutes() / 10)
+   }
+   ```
+
+2. **useEffect依存関係の調整**:
+   - `currentTime`が変更されたときに`shouldUpdateCandle()`をチェックし、trueなら`fetchData()`を実行
+   - 全時間足で同じ更新タイミングを使用
+
+#### 期待される効果
+
+1. **リアルなトレード環境の再現**:
+   - 10分足が更新されるたびに、上位時間足の最新のローソク足もリアルタイムで更新される
+   - 実際のトレード環境に近い動的なチャート表示
+
+2. **トレードスキル向上への貢献**:
+   - 上位時間足の変化を即座に確認できる
+   - マルチタイムフレーム分析の精度が向上
+
+3. **ユーザー体験の向上**:
+   - チャートが滑らかに更新される
+   - 違和感のない自然な動作
+
+#### 実装上の注意点
+
+1. **パフォーマンス**:
+   - 10分足が更新されるたびに全時間足のチャートを再取得するため、APIリクエストが増加
+   - ただし、バックエンドの処理は軽量であり、通常のシミュレーション速度では問題ない
+   - 高速再生（100x以上）では、必要に応じてレート制限を導入
+
+2. **チャートのちらつき防止**:
+   - 新しいデータが取得されるまで、古いデータを表示し続ける
+   - lightweight-chartsの`update()`メソッドを使用して、滑らかに更新
+
+#### テスト計画
+
+1. **単体テスト**:
+   - `shouldUpdateCandle()`が10分足の境界を正しく検出するか
+
+2. **結合テスト**:
+   - 10分足が1本更新されたときに、全時間足のチャートが再取得されるか
+   - 各時間足の最新のローソク足が正しく更新されるか
+
+3. **UIテスト**:
+   - シミュレーション実行中に、上位時間足の最新のローソク足がリアルタイムで更新されるか目視確認
+   - チャートがちらつかず、滑らかに更新されるか
+
+---
+
+### 9.6 F-003: パフォーマンス分析へのチャート表示機能
+
+#### 現状の問題点
+
+**視覚的な分析の欠如**:
+- 現在のパフォーマンス分析画面には統計情報（勝率、損益、ドローダウンなど）のみが表示されている
+- 売買履歴がどのような相場状況で発生したのか視覚的に確認できない
+- エントリー・イグジットのタイミングが適切だったか判断しづらい
+- トレードの改善点を見つけにくい
+
+**具体例**:
+```
+【現状】
+- 勝率: 65%
+- 総損益: +15,000円
+- 最大ドローダウン: -5,000円
+→ この数値だけでは、どこで勝ち/負けたのか、どのような相場状況だったのか分からない
+
+【期待される表示】
+- チャート上にエントリー・イグジットポイントをマーカーで表示
+- 買いエントリー: 緑の↑マーカー
+- 売りエントリー: 赤の↓マーカー
+- イグジット: ×マーカー
+- 損益が一目で分かる表示（プラスは緑、マイナスは赤）
+```
+
+#### 修正方針
+
+**基本コンセプト**:
+- パフォーマンス分析画面にチャートを追加
+- 売買履歴をチャート上に可視化
+- チャートと統計情報を並べて表示し、総合的な分析を可能にする
+
+**修正対象**:
+
+1. **パフォーマンス分析画面のレイアウト変更**:
+   - 上部: チャート（売買履歴マーカー付き）
+   - 下部: 統計情報（既存の表示）
+
+2. **売買履歴マーカーの表示**:
+   - エントリーポイント: 矢印マーカー（買い=緑↑、売り=赤↓）
+   - イグジットポイント: ×マーカー
+   - 損益情報: マーカーホバー時にツールチップで表示
+
+3. **チャートの時間範囲設定**:
+   - 売買履歴の開始時刻〜終了時刻を自動的に表示
+   - ユーザーが時間範囲を変更可能
+
+#### 実装方針
+
+**バックエンド実装**:
+
+1. **新しいAPIエンドポイント（オプション）**:
+   ```python
+   @router.get("/simulation/{simulation_id}/trades-with-candles")
+   async def get_trades_with_candles(
+       simulation_id: int,
+       timeframe: str = Query('H1', description="時間足"),
+       db: Session = Depends(get_db)
+   ):
+       """
+       売買履歴とローソク足データを一緒に取得する
+       """
+       # 売買履歴を取得
+       trades = get_trades(simulation_id, db)
+
+       # 売買履歴の時間範囲を取得
+       start_time = min(t.entry_time for t in trades)
+       end_time = max(t.exit_time for t in trades if t.exit_time)
+
+       # ローソク足データを取得
+       candles = get_candles(timeframe, start_time, end_time, limit=10000)
+
+       return {
+           'trades': trades,
+           'candles': candles,
+           'timeframe': timeframe,
+           'start_time': start_time,
+           'end_time': end_time
+       }
+   ```
+
+**フロントエンド実装**:
+
+1. **PerformanceAnalysisページの修正**:
+   ```typescript
+   // ChartPanelコンポーネントを追加
+   import ChartPanel from './ChartPanel'
+
+   // 売買履歴マーカーを追加
+   const addTradeMarkers = (chart, trades) => {
+     trades.forEach(trade => {
+       // エントリーマーカー
+       chart.addMarker({
+         time: trade.entry_time,
+         position: trade.type === 'buy' ? 'belowBar' : 'aboveBar',
+         color: trade.type === 'buy' ? '#00ff00' : '#ff0000',
+         shape: trade.type === 'buy' ? 'arrowUp' : 'arrowDown',
+         text: `Entry: ${trade.entry_price}`
+       })
+
+       // イグジットマーカー
+       if (trade.exit_time) {
+         chart.addMarker({
+           time: trade.exit_time,
+           position: 'aboveBar',
+           color: trade.profit > 0 ? '#00ff00' : '#ff0000',
+           shape: 'circle',
+           text: `Exit: ${trade.exit_price} (P/L: ${trade.profit})`
+         })
+       }
+     })
+   }
+   ```
+
+2. **レイアウト調整**:
+   - Grid layoutで上部にチャート、下部に統計情報
+   - チャートの高さは画面の50%程度
+   - 時間足切り替えボタンを追加
+
+#### 期待される効果
+
+1. **視覚的な分析の実現**:
+   - 売買履歴がどのような相場状況で発生したか一目で分かる
+   - エントリー・イグジットのタイミングが適切だったか判断しやすい
+
+2. **トレードスキル向上への貢献**:
+   - 良いトレードと悪いトレードのパターンを視覚的に比較できる
+   - 改善点を見つけやすい
+
+3. **ユーザー体験の向上**:
+   - 統計情報だけでなく、視覚的にも分析できる
+   - より直感的な分析が可能
+
+#### 実装上の注意点
+
+1. **パフォーマンス**:
+   - 売買履歴が多い場合、マーカーの描画に時間がかかる可能性
+   - 必要に応じて、表示するマーカー数を制限
+
+2. **チャートの時間範囲**:
+   - 売買履歴の時間範囲が長い場合、チャートが見づらくなる可能性
+   - ズーム・パン機能を提供
+
+#### テスト計画
+
+1. **UIテスト**:
+   - チャートが正しく表示されるか
+   - 売買履歴マーカーが正しい位置に表示されるか
+   - マーカーホバー時にツールチップが表示されるか
+
+---
+
+### 9.7 F-004: 売買履歴のインポート・エクスポート機能
+
+#### 現状の問題点
+
+**売買履歴の永続化と再分析の欠如**:
+- 現在のシミュレーターは、その場でトレードしてパフォーマンスを分析する仕組み
+- シミュレーションを終了すると、売買履歴がデータベースから削除される（または残っても再利用できない）
+- 過去のトレード結果を保存して、後で再分析できない
+- 複数のシミュレーション結果を比較できない
+
+**具体例**:
+```
+【現状】
+1. シミュレーション実行 → トレード → パフォーマンス分析
+2. 画面を閉じる → データが失われる（または再利用不可）
+3. 後で見返したい → 再度シミュレーションを実行する必要がある
+
+【期待される動作】
+1. シミュレーション実行 → トレード → パフォーマンス分析
+2. 売買履歴をエクスポート（CSV/JSON）
+3. 後で売買履歴をインポート → パフォーマンス分析
+4. 複数の売買履歴を比較分析
+```
+
+#### 修正方針
+
+**基本コンセプト**:
+- 売買履歴をCSV/JSON形式でエクスポートできる
+- 過去の売買履歴をファイルからインポートできる
+- インポートした履歴を元にパフォーマンス分析を実行できる
+- 複数の売買履歴を比較分析できる（将来的な拡張）
+
+**修正対象**:
+
+1. **売買履歴のエクスポート機能**:
+   - パフォーマンス分析画面に「エクスポート」ボタンを追加
+   - CSV形式とJSON形式をサポート
+   - ファイル名: `trades_YYYYMMDD_HHMMSS.csv` または `trades_YYYYMMDD_HHMMSS.json`
+
+2. **売買履歴のインポート機能**:
+   - パフォーマンス分析画面に「インポート」ボタンを追加
+   - CSV/JSONファイルを選択してインポート
+   - インポート後、パフォーマンス分析を実行
+
+3. **売買履歴のデータフォーマット**:
+   - CSV形式:
+     ```csv
+     trade_id,entry_time,entry_price,exit_time,exit_price,type,lots,profit,commission,swap,hold_time
+     1,2025-01-15 10:00:00,145.50,2025-01-15 12:00:00,145.80,buy,0.1,300,0,0,7200
+     2,2025-01-15 14:00:00,145.90,2025-01-15 16:00:00,145.60,sell,0.1,-300,0,0,7200
+     ```
+   - JSON形式:
+     ```json
+     {
+       "simulation_info": {
+         "start_time": "2025-01-15 09:00:00",
+         "end_time": "2025-01-15 18:00:00",
+         "initial_balance": 100000,
+         "final_balance": 115000
+       },
+       "trades": [
+         {
+           "trade_id": 1,
+           "entry_time": "2025-01-15 10:00:00",
+           "entry_price": 145.50,
+           "exit_time": "2025-01-15 12:00:00",
+           "exit_price": 145.80,
+           "type": "buy",
+           "lots": 0.1,
+           "profit": 300,
+           "commission": 0,
+           "swap": 0,
+           "hold_time": 7200
+         }
+       ]
+     }
+     ```
+
+#### 実装方針
+
+**バックエンド実装**:
+
+1. **新しいAPIエンドポイント**:
+   ```python
+   @router.get("/simulation/{simulation_id}/export")
+   async def export_trades(
+       simulation_id: int,
+       format: str = Query('csv', description="エクスポート形式（csv/json）"),
+       db: Session = Depends(get_db)
+   ):
+       """
+       売買履歴をエクスポートする
+       """
+       trades = get_trades(simulation_id, db)
+
+       if format == 'csv':
+           csv_data = generate_csv(trades)
+           return Response(content=csv_data, media_type='text/csv',
+                         headers={'Content-Disposition': f'attachment; filename=trades_{simulation_id}.csv'})
+       elif format == 'json':
+           json_data = generate_json(trades)
+           return Response(content=json_data, media_type='application/json',
+                         headers={'Content-Disposition': f'attachment; filename=trades_{simulation_id}.json'})
+
+   @router.post("/simulation/import")
+   async def import_trades(
+       file: UploadFile,
+       db: Session = Depends(get_db)
+   ):
+       """
+       売買履歴をインポートする
+       """
+       # ファイルの拡張子をチェック
+       if file.filename.endswith('.csv'):
+           trades = parse_csv(await file.read())
+       elif file.filename.endswith('.json'):
+           trades = parse_json(await file.read())
+       else:
+           raise HTTPException(status_code=400, detail="Unsupported file format")
+
+       # 一時的なシミュレーションとして保存
+       simulation = create_temp_simulation(db)
+       save_trades(simulation.id, trades, db)
+
+       return {
+           'success': True,
+           'simulation_id': simulation.id,
+           'trades_count': len(trades)
+       }
+   ```
+
+**フロントエンド実装**:
+
+1. **PerformanceAnalysisページの修正**:
+   ```typescript
+   // エクスポートボタン
+   const handleExport = async (format: 'csv' | 'json') => {
+     const response = await fetch(`/api/simulation/${simulationId}/export?format=${format}`)
+     const blob = await response.blob()
+     const url = window.URL.createObjectURL(blob)
+     const a = document.createElement('a')
+     a.href = url
+     a.download = `trades_${new Date().toISOString()}.${format}`
+     a.click()
+   }
+
+   // インポートボタン
+   const handleImport = async (file: File) => {
+     const formData = new FormData()
+     formData.append('file', file)
+
+     const response = await fetch('/api/simulation/import', {
+       method: 'POST',
+       body: formData
+     })
+
+     const data = await response.json()
+     // インポート成功後、パフォーマンス分析画面に遷移
+     navigate(`/performance/${data.simulation_id}`)
+   }
+   ```
+
+#### 期待される効果
+
+1. **売買履歴の永続化**:
+   - トレード結果を保存して、後で見返すことができる
+   - 長期的なトレードスキルの向上を追跡できる
+
+2. **複数シミュレーションの比較**:
+   - 異なる戦略の結果を比較できる
+   - ベストプラクティスを見つけやすい
+
+3. **ユーザー体験の向上**:
+   - シミュレーションを再実行する必要がない
+   - 過去のトレード結果を簡単に分析できる
+
+#### 実装上の注意点
+
+1. **データ整合性**:
+   - インポートしたデータが正しい形式か検証
+   - 必須フィールドが欠けていないかチェック
+
+2. **セキュリティ**:
+   - ファイルサイズの制限（例：10MB以下）
+   - 悪意のあるファイルをアップロードできないようにする
+
+#### テスト計画
+
+1. **単体テスト**:
+   - CSV/JSONのパース処理が正しく動作するか
+   - エクスポートしたファイルが正しい形式か
+
+2. **結合テスト**:
+   - エクスポート → インポート → パフォーマンス分析の一連の流れが正しく動作するか
+
+3. **UIテスト**:
+   - エクスポートボタンをクリックするとファイルがダウンロードされるか
+   - インポートボタンをクリックするとファイル選択ダイアログが表示されるか
+
+---
+
+### 9.8 F-005: AI（GPT-5.2）によるトレードフィードバック機能
+
+#### 現状の問題点
+
+**客観的なフィードバックの欠如**:
+- 現在のパフォーマンス分析では、統計情報のみが表示される
+- ユーザー自身でトレードの良し悪しを判断する必要がある
+- プロのトレーダーの視点からのアドバイスが得られない
+- 改善点が分かりにくい
+
+**具体例**:
+```
+【現状】
+- 勝率: 45%
+- 総損益: -5,000円
+- 最大ドローダウン: -10,000円
+→ この数値を見ても、何が悪いのか、どう改善すればいいのか分からない
+
+【期待されるフィードバック】
+「勝率45%は一般的に低いですが、損益がマイナスなのは損大利小のトレードをしている可能性があります。
+損切りラインを早めに設定し、利益確定を遅らせることで、損益比を改善できます。
+また、最大ドローダウンが-10,000円と大きいため、リスク管理を見直すことをお勧めします。
+1トレードあたりのリスクを資金の2%以下に抑えることを検討してください。」
+```
+
+#### 修正方針
+
+**基本コンセプト**:
+- OpenAI GPT-5.2 APIを利用して、売買履歴を分析
+- プロのトレーダー視点でフィードバックを生成
+- 改善点を具体的に提案
+- ユーザーのトレードスキル向上をサポート
+
+**修正対象**:
+
+1. **OpenAI API連携**:
+   - APIキー管理（環境変数またはユーザー設定）
+   - GPT-5.2 APIの呼び出し
+   - プロンプトエンジニアリング
+
+2. **フィードバック表示**:
+   - パフォーマンス分析画面に「AIフィードバック」セクションを追加
+   - フィードバック生成ボタン
+   - フィードバック結果の表示
+
+3. **プロンプト設計**:
+   - 売買履歴を構造化して送信
+   - プロのトレーダーとしての役割を指示
+   - 具体的な改善点を求める
+
+#### 実装方針
+
+**バックエンド実装**:
+
+1. **OpenAI API連携サービス**:
+   ```python
+   # src/services/ai_feedback_service.py
+   import openai
+   from typing import List, Dict
+
+   class AIFeedbackService:
+       def __init__(self, api_key: str):
+           openai.api_key = api_key
+
+       def generate_feedback(self, trades: List[Dict], performance_stats: Dict) -> str:
+           """
+           売買履歴とパフォーマンス統計からフィードバックを生成
+           """
+           prompt = self._build_prompt(trades, performance_stats)
+
+           response = openai.ChatCompletion.create(
+               model="gpt-5-turbo",  # Note: GPT-5.2は仮の名前、実際のモデル名に置き換える
+               messages=[
+                   {
+                       "role": "system",
+                       "content": """あなたは経験豊富なプロのFXトレーダーです。
+                       ユーザーの売買履歴を分析し、具体的で実践的なアドバイスを提供してください。
+                       以下の点に注目して分析してください：
+                       1. リスク管理（損切り、資金管理）
+                       2. エントリー・イグジットのタイミング
+                       3. 損益比（リスクリワード比）
+                       4. トレード頻度
+                       5. メンタル管理（連敗後の行動など）
+                       6. トレンドフォローかレンジ相場か
+
+                       フィードバックは以下の構成で提供してください：
+                       1. 総合評価（良い点・悪い点）
+                       2. 具体的な改善点（優先度順）
+                       3. 次回のトレードで意識すべきこと
+                       """
+                   },
+                   {
+                       "role": "user",
+                       "content": prompt
+                   }
+               ],
+               temperature=0.7,
+               max_tokens=2000
+           )
+
+           return response.choices[0].message.content
+
+       def _build_prompt(self, trades: List[Dict], performance_stats: Dict) -> str:
+           """
+           売買履歴とパフォーマンス統計をプロンプトに整形
+           """
+           prompt = f"""
+           以下の売買履歴とパフォーマンス統計を分析し、フィードバックを提供してください。
+
+           【パフォーマンス統計】
+           - 総トレード数: {performance_stats['total_trades']}
+           - 勝トレード数: {performance_stats['win_trades']}
+           - 負トレード数: {performance_stats['lose_trades']}
+           - 勝率: {performance_stats['win_rate']:.2%}
+           - 総損益: {performance_stats['total_profit']}円
+           - 平均利益: {performance_stats['avg_profit']}円
+           - 平均損失: {performance_stats['avg_loss']}円
+           - 損益比: {performance_stats['profit_loss_ratio']:.2f}
+           - 最大ドローダウン: {performance_stats['max_drawdown']}円
+           - プロフィットファクター: {performance_stats['profit_factor']:.2f}
+
+           【売買履歴】（最新10件）
+           """
+
+           for i, trade in enumerate(trades[-10:], 1):
+               prompt += f"""
+               {i}. {trade['type'].upper()} | エントリー: {trade['entry_time']} @ {trade['entry_price']} |
+                  イグジット: {trade['exit_time']} @ {trade['exit_price']} |
+                  損益: {trade['profit']}円 | 保有時間: {trade['hold_time']}秒
+               """
+
+           return prompt
+   ```
+
+2. **新しいAPIエンドポイント**:
+   ```python
+   @router.post("/simulation/{simulation_id}/ai-feedback")
+   async def generate_ai_feedback(
+       simulation_id: int,
+       api_key: str = Header(..., alias="X-OpenAI-API-Key"),
+       db: Session = Depends(get_db)
+   ):
+       """
+       AIフィードバックを生成する
+       """
+       # 売買履歴とパフォーマンス統計を取得
+       trades = get_trades(simulation_id, db)
+       performance_stats = calculate_performance_stats(trades)
+
+       # AIフィードバックを生成
+       ai_service = AIFeedbackService(api_key)
+       feedback = ai_service.generate_feedback(trades, performance_stats)
+
+       return {
+           'success': True,
+           'feedback': feedback
+       }
+   ```
+
+**フロントエンド実装**:
+
+1. **PerformanceAnalysisページの修正**:
+   ```typescript
+   // AIフィードバック生成
+   const [feedback, setFeedback] = useState<string | null>(null)
+   const [isGenerating, setIsGenerating] = useState(false)
+
+   const handleGenerateFeedback = async () => {
+     setIsGenerating(true)
+     try {
+       // APIキーを取得（ユーザー設定から、または環境変数から）
+       const apiKey = getOpenAIApiKey()
+
+       const response = await fetch(`/api/simulation/${simulationId}/ai-feedback`, {
+         method: 'POST',
+         headers: {
+           'X-OpenAI-API-Key': apiKey
+         }
+       })
+
+       const data = await response.json()
+       setFeedback(data.feedback)
+     } catch (error) {
+       console.error('Failed to generate AI feedback:', error)
+       alert('AIフィードバックの生成に失敗しました。APIキーを確認してください。')
+     } finally {
+       setIsGenerating(false)
+     }
+   }
+
+   // UIに追加
+   <div className="ai-feedback-section">
+     <h3>AIフィードバック</h3>
+     <button onClick={handleGenerateFeedback} disabled={isGenerating}>
+       {isGenerating ? '生成中...' : 'AIフィードバックを生成'}
+     </button>
+     {feedback && (
+       <div className="feedback-content">
+         <ReactMarkdown>{feedback}</ReactMarkdown>
+       </div>
+     )}
+   </div>
+   ```
+
+2. **APIキー設定画面**:
+   - 設定画面に「OpenAI APIキー」入力フィールドを追加
+   - ローカルストレージまたはバックエンドに保存
+   - セキュリティ: APIキーは暗号化して保存
+
+#### 期待される効果
+
+1. **客観的なフィードバック**:
+   - プロのトレーダー視点からのアドバイスが得られる
+   - 自分では気づけない改善点を発見できる
+
+2. **トレードスキル向上への貢献**:
+   - 具体的な改善点が提示される
+   - 次回のトレードで意識すべきことが明確になる
+
+3. **学習効率の向上**:
+   - 試行錯誤の時間を短縮できる
+   - 効率的にスキルアップできる
+
+#### 実装上の注意点
+
+1. **APIコスト**:
+   - GPT-5.2（または GPT-4）の使用にはコストがかかる
+   - ユーザーに明示的に了解を得る
+   - 使用回数制限を設ける（オプション）
+
+2. **APIキー管理**:
+   - ユーザーが自分のAPIキーを設定できるようにする
+   - または、アプリケーション側でAPIキーを管理し、使用量に応じて課金
+   - セキュリティ: APIキーは暗号化して保存
+
+3. **レート制限**:
+   - OpenAI APIのレート制限に注意
+   - 短時間に大量のリクエストを送らないようにする
+
+4. **エラーハンドリング**:
+   - APIキーが無効な場合のエラー処理
+   - API呼び出しに失敗した場合のリトライ処理
+
+5. **プライバシー**:
+   - 売買履歴をOpenAIに送信することをユーザーに明示
+   - プライバシーポリシーを確認
+
+#### テスト計画
+
+1. **単体テスト**:
+   - プロンプト生成ロジックが正しく動作するか
+   - OpenAI APIのモック応答を使用してテスト
+
+2. **結合テスト**:
+   - 実際のOpenAI APIを使用してフィードバックが生成されるか
+   - APIキーが無効な場合にエラー処理が正しく動作するか
+
+3. **UIテスト**:
+   - フィードバック生成ボタンをクリックすると処理が開始されるか
+   - 生成中の表示が正しく表示されるか
+   - フィードバック結果が正しく表示されるか
+
+#### 代替案
+
+**注意**: 2026年2月時点で、OpenAI GPT-5.2は存在しない可能性があります。その場合、以下の代替案を検討してください：
+
+1. **GPT-4 Turboを使用**:
+   - モデル名: `gpt-4-turbo-preview` または最新のGPT-4モデル
+
+2. **Claude 3.5 Sonnetを使用**:
+   - Anthropic APIを使用
+   - より詳細な分析が可能
+
+3. **オープンソースLLMを使用**:
+   - Llama 3, Mistral, Gemmaなど
+   - セルフホスティングでコストを削減
+
+実装時には、最新のLLMモデルとAPIの状況を確認してください。
+
+---
+
 ## 10. 将来の拡張性
 - リアルタイムデータとの連携（将来的に）
 - 自動売買ロジックのバックテスト機能
 - 複数の取引戦略のパフォーマンス比較
 - モバイル対応
+- 複数シミュレーション結果の比較分析（F-004の拡張）
+- AIによる自動トレード戦略提案（F-005の拡張）

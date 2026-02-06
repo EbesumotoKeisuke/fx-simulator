@@ -806,19 +806,42 @@ export const tradesApi = {
   },
 
   /**
-   * トレード履歴をCSV形式でエクスポートする
+   * トレード履歴をCSVまたはJSON形式でエクスポートする
    *
-   * 全てのトレード履歴をCSVファイルとしてダウンロードします。
+   * 全てのトレード履歴をファイルとしてダウンロードします。
    * 新しいタブ/ウィンドウが開き、ブラウザのダウンロード機能で
    * ファイルが保存されます。
    * エクスポートされたCSVは、Excelなどのスプレッドシートソフトで
    * 分析することができます。
    */
-  export: () => {
+  export: (format: 'csv' | 'json' = 'csv') => {
     // エクスポート用のエンドポイントURLを構築
-    const url = `${API_BASE_URL}/trades/export`
-    // 新しいタブでCSVダウンロードを開始
+    const params = new URLSearchParams({ format })
+    const url = `${API_BASE_URL}/trades/export?${params}`
+    // 新しいタブでファイルダウンロードを開始
     window.open(url, '_blank')
+  },
+
+  /**
+   * トレード履歴をインポートする
+   *
+   * CSVまたはJSON形式のファイルからトレード履歴をインポートします。
+   */
+  import: async (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+
+    const response = await fetch(`${API_BASE_URL}/trades/import`, {
+      method: 'POST',
+      body: formData,
+    })
+
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.detail || 'インポートに失敗しました')
+    }
+
+    return response.json()
   },
 }
 
@@ -939,5 +962,26 @@ export const analyticsApi = {
    */
   getDrawdown: () => {
     return fetchApi<DrawdownData>('/analytics/drawdown')
+  },
+
+  /**
+   * 売買履歴とローソク足データを一緒に取得する（パフォーマンス分析用）
+   *
+   * F-003: パフォーマンス分析へのチャート表示機能
+   * 売買履歴の時間範囲に対応するローソク足データを取得し、
+   * チャート上に売買履歴をマーカーとして表示するために使用します。
+   *
+   * @param timeframe - 時間足（'W1', 'D1', 'H1', 'M10'）
+   * @returns 売買履歴とローソク足データ
+   */
+  getTradesWithCandles: (timeframe: string = 'H1') => {
+    const params = new URLSearchParams({ timeframe })
+    return fetchApi<{
+      trades: Trade[]
+      candles: Candle[]
+      timeframe: string
+      start_time: string | null
+      end_time: string | null
+    }>(`/analytics/trades-with-candles?${params}`)
   },
 }
