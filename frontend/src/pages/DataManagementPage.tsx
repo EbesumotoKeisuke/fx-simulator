@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { marketDataApi, CsvFile, DateRangeResponse } from '../services/api'
+import LoadingOverlay from '../components/LoadingOverlay'
 
 type TimeframeLabel = {
   [key: string]: string
@@ -326,6 +327,16 @@ function DataManagementPage() {
           <pre className="text-text-primary whitespace-pre-wrap">{importResult}</pre>
         </div>
       )}
+
+      {/* Loading Overlay */}
+      <LoadingOverlay
+        isVisible={importing !== null}
+        message={
+          importing === 'all'
+            ? '全てのデータをインポート中...'
+            : `${importing ? TIMEFRAME_LABELS[importing] : ''}データをインポート中...`
+        }
+      />
     </div>
   )
 }

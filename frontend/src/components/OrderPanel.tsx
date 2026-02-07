@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ordersApi, PendingOrderRequest } from '../services/api'
 import { useSimulationStore } from '../store/simulationStore'
+import LoadingSpinner from './LoadingSpinner'
 
 interface OrderPanelProps {
   currentPrice: number
@@ -246,9 +247,10 @@ function OrderPanel({ currentPrice, onRefresh }: OrderPanelProps) {
           <button
             onClick={handleOrder}
             disabled={!canTrade || isOrdering}
-            className="px-4 py-1 bg-btn-primary text-text-strong rounded hover:opacity-80 disabled:opacity-50"
+            className="px-4 py-1 bg-btn-primary text-text-strong rounded hover:opacity-80 disabled:opacity-50 flex items-center gap-2"
           >
-            {isOrdering ? '...' : '注文'}
+            {isOrdering && <LoadingSpinner size="sm" />}
+            {isOrdering ? '処理中...' : '注文'}
           </button>
 
           {/* メッセージ表示 */}

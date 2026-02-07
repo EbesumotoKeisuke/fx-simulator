@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { positionsApi, Position, SetSLTPRequest, AccountInfo } from '../services/api'
 import { useSimulationStore } from '../store/simulationStore'
+import LoadingSpinner from './LoadingSpinner'
 
 interface PositionPanelProps {
   refreshTrigger?: number
@@ -236,9 +237,10 @@ function PositionPanel({ refreshTrigger, account, currentPrice }: PositionPanelP
             <button
               onClick={handleCloseAll}
               disabled={loading || (status !== 'running' && status !== 'paused')}
-              className="px-3 py-1 bg-sell text-text-strong rounded text-sm hover:opacity-80 disabled:opacity-50"
+              className="px-3 py-1 bg-sell text-text-strong rounded text-sm hover:opacity-80 disabled:opacity-50 flex items-center gap-2"
             >
-              {loading ? '...' : '全決済'}
+              {loading && <LoadingSpinner size="sm" />}
+              {loading ? '処理中...' : '全決済'}
             </button>
           )}
         </div>
@@ -335,8 +337,9 @@ function PositionPanel({ refreshTrigger, account, currentPrice }: PositionPanelP
                           <button
                             onClick={() => handleClose(pos.position_id)}
                             disabled={closingId === pos.position_id || (status !== 'running' && status !== 'paused')}
-                            className="px-2 py-0.5 bg-btn-secondary rounded text-xs hover:opacity-80 disabled:opacity-50"
+                            className="px-2 py-0.5 bg-btn-secondary rounded text-xs hover:opacity-80 disabled:opacity-50 flex items-center gap-1"
                           >
+                            {closingId === pos.position_id && <LoadingSpinner size="sm" />}
                             {closingId === pos.position_id ? '...' : '決済'}
                           </button>
                         </div>
@@ -511,8 +514,9 @@ function PositionPanel({ refreshTrigger, account, currentPrice }: PositionPanelP
               <button
                 onClick={handleSaveSltp}
                 disabled={isSaving}
-                className="px-4 py-2 bg-btn-primary text-text-strong rounded hover:opacity-80 disabled:opacity-50"
+                className="px-4 py-2 bg-btn-primary text-text-strong rounded hover:opacity-80 disabled:opacity-50 flex items-center gap-2"
               >
+                {isSaving && <LoadingSpinner size="sm" />}
                 {isSaving ? '保存中...' : '保存'}
               </button>
             </div>

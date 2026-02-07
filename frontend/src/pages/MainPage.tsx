@@ -9,6 +9,8 @@ import PendingOrderPanel from '../components/PendingOrderPanel'
 import AccountInfo from '../components/AccountInfo'
 import SimulationSettingsModal from '../components/SimulationSettingsModal'
 import SimulationResultModal from '../components/SimulationResultModal'
+import AlertBanner from '../components/AlertBanner'
+import LoadingOverlay from '../components/LoadingOverlay'
 import { useSimulationStore } from '../store/simulationStore'
 import { marketDataApi, simulationApi, accountApi, AccountInfo as AccountInfoType } from '../services/api'
 
@@ -54,6 +56,7 @@ function MainPage() {
     status,
     currentTime,
     speed,
+    isLoading,
     fetchStatus,
     stopSimulation,
     resumeSimulation,
@@ -315,6 +318,9 @@ function MainPage() {
         )}
       </div>
 
+      {/* Alert Banner */}
+      <AlertBanner />
+
       {/* Charts */}
       <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-2 p-2 min-h-0">
         <ChartPanel
@@ -401,6 +407,17 @@ function MainPage() {
       <SimulationResultModal
         isOpen={isResultOpen}
         onClose={() => setIsResultOpen(false)}
+      />
+
+      {/* Loading Overlay */}
+      <LoadingOverlay
+        isVisible={isLoading}
+        message={
+          status === 'idle' ? 'シミュレーションを準備中...' :
+          status === 'paused' ? 'チャートデータを読み込み中...' :
+          status === 'stopped' ? 'シミュレーションを終了中...' :
+          'データを読み込み中...'
+        }
       />
     </div>
   )
