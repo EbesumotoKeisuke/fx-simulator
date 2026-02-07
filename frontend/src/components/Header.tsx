@@ -107,8 +107,8 @@ function Header({ currentTime, status, onDataManagement, onAnalysis, onSettings,
                   <li><strong>成行注文時</strong>: 注文パネルでSL/TPのチェックボックスをオンにして設定</li>
                   <li><strong>既存ポジション</strong>: ポジション一覧の「SL/TP」ボタンから編集</li>
                   <li>価格指定とpips指定の2つのモードがあります</li>
-                  <li>pips指定時は、プリセットボタン（-10、-20、-30、-50）で素早く設定可能</li>
-                  <li>SLは常に負の値、TPは買いなら正・売りなら負の値を使用します</li>
+                  <li>pips指定時は、プリセットボタン（-30、-20、+20、+30）で素早く設定可能</li>
+                  <li>SL/TPは正負どちらの値でも入力可能（エントリー価格からの差分として計算されます）</li>
                 </ul>
               </section>
 

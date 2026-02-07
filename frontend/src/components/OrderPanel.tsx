@@ -297,7 +297,7 @@ function OrderPanel({ currentPrice, onRefresh }: OrderPanelProps) {
                         type="number"
                         value={slPips}
                         onChange={(e) => setSlPips(e.target.value)}
-                        placeholder="-20"
+                        placeholder="±20"
                         className="w-20 px-2 py-1 bg-bg-primary border border-border rounded text-sm"
                         step="1"
                       />
@@ -306,10 +306,10 @@ function OrderPanel({ currentPrice, onRefresh }: OrderPanelProps) {
                       <div className="flex gap-1">
                         <button
                           type="button"
-                          onClick={() => setSlPips('-10')}
+                          onClick={() => setSlPips('-30')}
                           className="px-2 py-0.5 bg-bg-primary border border-border rounded text-xs hover:bg-border"
                         >
-                          -10
+                          -30
                         </button>
                         <button
                           type="button"
@@ -320,17 +320,17 @@ function OrderPanel({ currentPrice, onRefresh }: OrderPanelProps) {
                         </button>
                         <button
                           type="button"
-                          onClick={() => setSlPips('-30')}
+                          onClick={() => setSlPips('20')}
                           className="px-2 py-0.5 bg-bg-primary border border-border rounded text-xs hover:bg-border"
                         >
-                          -30
+                          +20
                         </button>
                         <button
                           type="button"
-                          onClick={() => setSlPips('-50')}
+                          onClick={() => setSlPips('30')}
                           className="px-2 py-0.5 bg-bg-primary border border-border rounded text-xs hover:bg-border"
                         >
-                          -50
+                          +30
                         </button>
                       </div>
                     </>
@@ -384,7 +384,7 @@ function OrderPanel({ currentPrice, onRefresh }: OrderPanelProps) {
             </div>
 
             <div className="text-xs text-text-secondary">
-              ※ SL: 負の値、TP: 買いは正・売りは負（バックエンドで自動計算されます）
+              ※ SL/TP: pips値で指定（正負どちらも可、エントリー価格からの差分として計算されます）
             </div>
           </div>
         )}

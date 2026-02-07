@@ -424,12 +424,13 @@ function ChartPanel({
           }
 
           if (finalTime !== null) {
+            const priceText = order.entry_price.toFixed(3)
             markers.push({
               time: finalTime as Time,
               position: order.side === 'buy' ? 'belowBar' : 'aboveBar',
               color: order.side === 'buy' ? '#26a69a' : '#ef5350',
               shape: order.side === 'buy' ? 'arrowUp' : 'arrowDown',
-              text: order.side === 'buy' ? '買' : '売'
+              text: `${order.side === 'buy' ? '買' : '売'}\n${priceText}`
             })
           }
         })
@@ -468,12 +469,15 @@ function ChartPanel({
           }
 
           if (finalTime !== null) {
+            const pnlText = `${trade.realized_pnl_pips >= 0 ? '+' : ''}${trade.realized_pnl_pips.toFixed(1)}p`
+            const priceText = trade.exit_price.toFixed(3)
+            const markerColor = trade.realized_pnl >= 0 ? '#26a69a' : '#ef5350'
             markers.push({
               time: finalTime as Time,
               position: trade.side === 'buy' ? 'aboveBar' : 'belowBar',
-              color: '#2196f3',
+              color: markerColor,
               shape: 'circle',
-              text: '決'
+              text: `決\n${priceText}\n${pnlText}`
             })
           }
         })
@@ -512,7 +516,7 @@ function ChartPanel({
       layout: {
         background: { color: '#16213e' },
         textColor: '#e6e6e6',
-        fontSize: 14,
+        fontSize: 16,
       },
       grid: {
         vertLines: { color: '#2d4263' },
@@ -521,7 +525,7 @@ function ChartPanel({
       width: chartContainerRef.current.clientWidth,
       height: chartContainerRef.current.clientHeight,
       localization: {
-        // 時刻表示を yyyy/mm/dd HH:mm 形式にカスタマイズ
+        // 時刻表示を yyyy/mm/dd(曜日) HH:mm 形式にカスタマイズ
         timeFormatter: (timestamp: number) => {
           const date = new Date(timestamp * 1000)
           const year = date.getUTCFullYear()
@@ -529,7 +533,8 @@ function ChartPanel({
           const day = String(date.getUTCDate()).padStart(2, '0')
           const hour = String(date.getUTCHours()).padStart(2, '0')
           const minute = String(date.getUTCMinutes()).padStart(2, '0')
-          return `${year}/${month}/${day} ${hour}:${minute}`
+          const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][date.getUTCDay()]
+          return `${year}/${month}/${day}(${dayOfWeek}) ${hour}:${minute}`
         },
       },
       timeScale: {
@@ -621,17 +626,20 @@ function ChartPanel({
           const parts = param.time.split(' ')
           const dateParts = parts[0].split('-')
           const timePart = parts.length > 1 ? parts[1] : '00:00'
-          timeStr = `${dateParts[0]}/${dateParts[1]}/${dateParts[2]} ${timePart}`
+          const date = new Date(param.time)
+          const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][date.getDay()]
+          timeStr = `${dateParts[0]}/${dateParts[1]}/${dateParts[2]}(${dayOfWeek}) ${timePart}`
         } else {
           // 数値タイムスタンプの場合：疑似UTCタイムスタンプからJST時刻を表示
-          // yyyy/mm/dd HH:MM 形式で表示
+          // yyyy/mm/dd(曜日) HH:MM 形式で表示
           const date = new Date((param.time as number) * 1000)
           const year = date.getUTCFullYear()
           const month = String(date.getUTCMonth() + 1).padStart(2, '0')
           const day = String(date.getUTCDate()).padStart(2, '0')
           const hour = String(date.getUTCHours()).padStart(2, '0')
           const minute = String(date.getUTCMinutes()).padStart(2, '0')
-          timeStr = `${year}/${month}/${day} ${hour}:${minute}`
+          const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][date.getUTCDay()]
+          timeStr = `${year}/${month}/${day}(${dayOfWeek}) ${hour}:${minute}`
         }
         setOhlcData({
           time: timeStr,
@@ -740,20 +748,25 @@ function ChartPanel({
         const parts = candleTime.split(' ')
         const dateParts = parts[0].split('-')
         const timePart = parts.length > 1 ? parts[1] : '00:00'
-        timeStr = `${dateParts[0]}/${dateParts[1]}/${dateParts[2]} ${timePart}`
+        const date = new Date(candleTime)
+        const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][date.getDay()]
+        timeStr = `${dateParts[0]}/${dateParts[1]}/${dateParts[2]}(${dayOfWeek}) ${timePart}`
       } else if (typeof candleTime === 'number') {
-        // 数値タイムスタンプの場合：yyyy/mm/dd HH:MM 形式で表示
+        // 数値タイムスタンプの場合：yyyy/mm/dd(曜日) HH:MM 形式で表示
         const date = new Date(candleTime * 1000)
         const year = date.getUTCFullYear()
         const month = String(date.getUTCMonth() + 1).padStart(2, '0')
         const day = String(date.getUTCDate()).padStart(2, '0')
         const hour = String(date.getUTCHours()).padStart(2, '0')
         const minute = String(date.getUTCMinutes()).padStart(2, '0')
-        timeStr = `${year}/${month}/${day} ${hour}:${minute}`
+        const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][date.getUTCDay()]
+        timeStr = `${year}/${month}/${day}(${dayOfWeek}) ${hour}:${minute}`
       } else {
         // BusinessDay型の場合
         const bd = candleTime as { year: number; month: number; day: number }
-        timeStr = `${bd.year}/${String(bd.month).padStart(2, '0')}/${String(bd.day).padStart(2, '0')} 00:00`
+        const date = new Date(bd.year, bd.month - 1, bd.day)
+        const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][date.getDay()]
+        timeStr = `${bd.year}/${String(bd.month).padStart(2, '0')}/${String(bd.day).padStart(2, '0')}(${dayOfWeek}) 00:00`
       }
 
       setOhlcData({
