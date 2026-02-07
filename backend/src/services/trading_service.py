@@ -534,6 +534,8 @@ class TradingService:
                 "unrealized_pnl": 0,
                 "realized_pnl": 0,
                 "initial_balance": 0,
+                "margin_used": 0,
+                "margin_available": 0,
             }
 
         account = self._get_account(simulation.id)
@@ -544,6 +546,8 @@ class TradingService:
                 "unrealized_pnl": 0,
                 "realized_pnl": 0,
                 "initial_balance": 0,
+                "margin_used": 0,
+                "margin_available": 0,
             }
 
         # 含み損益を計算
@@ -557,12 +561,33 @@ class TradingService:
         account.equity = Decimal(str(round(equity, 2)))
         self.db.commit()
 
+        # 使用証拠金を計算（両建て対応）
+        # 買いと売りのポジションを分けて計算し、大きい方のマージンを使用
+        CURRENCY_PER_LOT = 100000  # 1ロット = 100,000通貨
+        LEVERAGE = 25  # レバレッジ25倍
+        buy_margin = 0.0
+        sell_margin = 0.0
+        for position in positions_data["positions"]:
+            margin = (position["entry_price"] * position["lot_size"] * CURRENCY_PER_LOT) / LEVERAGE
+            if position["side"] == "buy":
+                buy_margin += margin
+            else:  # sell
+                sell_margin += margin
+
+        # 両建ての場合、大きい方のポジションのマージンを使用
+        margin_used = max(buy_margin, sell_margin)
+
+        # 利用可能証拠金 = 有効証拠金 - 使用証拠金
+        margin_available = equity - margin_used
+
         return {
             "balance": float(account.balance),
             "equity": round(equity, 2),
             "unrealized_pnl": unrealized_pnl,
             "realized_pnl": float(account.realized_pnl),
             "initial_balance": float(account.initial_balance),
+            "margin_used": round(margin_used, 2),
+            "margin_available": round(margin_available, 2),
         }
 
     def get_trades(self, limit: int = 50, offset: int = 0) -> dict:
