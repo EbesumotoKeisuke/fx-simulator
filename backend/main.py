@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.routes import market_data, simulation, orders, positions, account, trades, analytics
+from src.routes import market_data, simulation, orders, positions, account, trades, analytics, alerts
 from src.utils.database import engine, Base
 from src.models import candle, simulation as sim_model, account as acc_model, order, position, trade, pending_order
 
@@ -40,6 +40,7 @@ app.include_router(positions.router, prefix="/api/v1/positions", tags=["Position
 app.include_router(account.router, prefix="/api/v1/account", tags=["Account"])
 app.include_router(trades.router, prefix="/api/v1/trades", tags=["Trades"])
 app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["Analytics"])
+app.include_router(alerts.router, prefix="/api/v1/alerts", tags=["Alerts"])
 
 
 @app.get("/")

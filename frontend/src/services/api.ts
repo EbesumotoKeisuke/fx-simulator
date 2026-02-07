@@ -927,6 +927,86 @@ export interface DrawdownData {
   max_drawdown_percent: number
 }
 
+// ============================================
+// アラート API
+// ============================================
+
+/**
+ * アラート情報のインターフェース
+ */
+export interface Alert {
+  /** アラートID */
+  id: string
+  /** 重要度（info, warning, danger） */
+  type: 'info' | 'warning' | 'danger'
+  /** アラートメッセージ */
+  message: string
+  /** アラートカテゴリ */
+  category: string
+  /** 生成時刻 */
+  timestamp: string
+}
+
+/**
+ * 分析サマリーのインターフェース
+ */
+export interface AnalysisSummary {
+  simulation_id: string
+  total_trades: number
+  hour_analysis: Record<number, { winrate: number; total_trades: number; pnl: number }>
+  best_hour: { hour: number; winrate: number; total_trades: number; pnl: number } | null
+  worst_hour: { hour: number; winrate: number; total_trades: number; pnl: number } | null
+  max_consecutive_losses: number
+  suggestions: Array<{
+    category: string
+    issue: string
+    suggestion: string
+  }>
+}
+
+export const alertsApi = {
+  /**
+   * 現在のアラートを取得する
+   *
+   * トレード状況に基づいてアラートを生成し返却します。
+   *
+   * @param lotSize - 注文しようとしているロットサイズ（オプション）
+   * @returns アラートのリスト
+   */
+  getAlerts: (lotSize?: number) => {
+    const params = new URLSearchParams()
+    if (lotSize !== undefined) {
+      params.append('lot_size', String(lotSize))
+    }
+    const queryString = params.toString()
+    return fetchApi<{ alerts: Alert[] }>(`/alerts${queryString ? `?${queryString}` : ''}`)
+  },
+
+  /**
+   * 注文前にアラートをチェックする
+   *
+   * @param lotSize - 注文しようとしているロットサイズ
+   * @returns アラートチェック結果
+   */
+  checkPreOrder: (lotSize: number) => {
+    return fetchApi<{ alerts: Alert[]; has_danger: boolean; has_warning: boolean }>('/alerts/check', {
+      method: 'POST',
+      body: JSON.stringify({ lot_size: lotSize }),
+    })
+  },
+
+  /**
+   * トレード分析サマリーを取得する
+   *
+   * 時間帯別の勝率、連敗パターン、改善提案などを取得します。
+   *
+   * @returns 分析サマリー
+   */
+  getAnalysisSummary: () => {
+    return fetchApi<AnalysisSummary>('/alerts/analysis-summary')
+  },
+}
+
 export const analyticsApi = {
   /**
    * パフォーマンス指標を取得する

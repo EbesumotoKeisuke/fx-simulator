@@ -32,12 +32,37 @@ FXトレードのシミュレーションツール。過去の為替データを
 - **データベース**: PostgreSQL
 - **開発環境**: Docker
 
-## セットアップ
+## クイックスタート（推奨）
+
+### Windows - 自動セットアップ
+
+```bash
+# リポジトリをクローン
+git clone <repository-url>
+cd fx-simulator
+
+# 自動セットアップスクリプトを実行（これだけでOK！）
+setup_and_start.bat
+```
+
+このスクリプトが自動的に以下を実行します:
+- ✅ Claude Desktop MCP設定の作成
+- ✅ Dockerコンテナの起動
+- ✅ 環境構築
+
+Claude Desktopを再起動後、 http://localhost:3000 でシミュレーターが使えます。
+
+**詳細**: [README_SETUP.md](README_SETUP.md) を参照
+
+---
+
+## 手動セットアップ
 
 ### 必要条件
 
 - Docker Desktop
 - Git
+- Python 3.11以上（Claude Desktop連携を使う場合）
 
 ### 起動方法
 
@@ -45,7 +70,7 @@ FXトレードのシミュレーションツール。過去の為替データを
 
 ```bash
 git clone <repository-url>
-cd fx-trade-simulator
+cd fx-simulator
 ```
 
 2. 環境変数ファイルを作成
