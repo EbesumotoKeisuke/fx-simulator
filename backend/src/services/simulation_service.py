@@ -342,6 +342,8 @@ class SimulationService:
         実行中のシミュレーションの現在時刻を指定した時刻に更新する。
         一時停止中または停止済みの場合はエラーを返す。
 
+        データがない場合（週末など）は、次の利用可能なデータの時刻まで自動的にスキップする。
+
         Args:
             new_time (datetime): 新しいシミュレーション時刻
 
@@ -349,6 +351,7 @@ class SimulationService:
             dict: 更新結果を含む辞書
                 - simulation_id (str): シミュレーションID
                 - current_time (str): 新しい現在時刻（ISO形式）
+                - skipped (bool): 週末などをスキップした場合はTrue
                 エラー時は {"error": "エラーメッセージ"}
         """
         try:
@@ -358,6 +361,24 @@ class SimulationService:
 
             if simulation.status != "running":
                 return {"error": "Simulation is not running"}
+
+            # 新しい時刻でM10データが存在するかチェック（週末スキップ機能）
+            from .market_data_service import MarketDataService
+            market_data_service = MarketDataService(self.db)
+
+            # 指定時刻の±5分以内にデータがあるかチェック
+            candles = market_data_service.get_candles_before('M10', new_time, 1)
+            skipped = False
+
+            if not candles or (candles and abs((datetime.fromisoformat(candles[0]['timestamp']) - new_time).total_seconds()) > 600):
+                # データがない、または最新データが10分以上離れている場合、次のデータを探す
+                next_data = self._find_next_available_data('M10', new_time, market_data_service)
+                if next_data:
+                    new_time = datetime.fromisoformat(next_data['timestamp'])
+                    skipped = True
+                    print(f"[advance_time] Weekend detected, skipped to {new_time.isoformat()}")
+                else:
+                    return {"error": "No more data available - simulation reached end of data"}
 
             simulation.current_time = new_time
 
@@ -386,6 +407,7 @@ class SimulationService:
             return {
                 "simulation_id": str(simulation.id),
                 "current_time": simulation.current_time.isoformat(),
+                "skipped": skipped,
                 "sltp_triggered": sltp_result.get("triggered_positions", []),
                 "sltp_conflicts": sltp_result.get("conflict_positions", []),
             }
@@ -395,6 +417,45 @@ class SimulationService:
             traceback.print_exc()
             self.db.rollback()
             return {"error": str(e)}
+
+    def _find_next_available_data(
+        self,
+        timeframe: str,
+        after_time: datetime,
+        market_data_service
+    ) -> Optional[dict]:
+        """
+        指定時刻以降の次の利用可能なデータを探す（週末スキップ用）
+
+        Args:
+            timeframe (str): 時間足（通常は'M10'）
+            after_time (datetime): この時刻より後のデータを探す
+            market_data_service: MarketDataServiceのインスタンス
+
+        Returns:
+            Optional[dict]: 次のローソク足データ、見つからない場合はNone
+        """
+        from ..models.candle import Candle
+
+        # after_time より後の最初のデータを取得
+        next_candle = (
+            self.db.query(Candle)
+            .filter(Candle.timeframe == timeframe)
+            .filter(Candle.timestamp > after_time)
+            .order_by(Candle.timestamp.asc())
+            .first()
+        )
+
+        if next_candle:
+            return {
+                "timestamp": next_candle.timestamp.isoformat(),
+                "open": float(next_candle.open),
+                "high": float(next_candle.high),
+                "low": float(next_candle.low),
+                "close": float(next_candle.close),
+                "volume": next_candle.volume,
+            }
+        return None
 
     def get_current_time(self) -> Optional[datetime]:
         """
