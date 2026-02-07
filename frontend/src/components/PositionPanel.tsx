@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback } from 'react'
-import { positionsApi, Position, SetSLTPRequest } from '../services/api'
+import { positionsApi, Position, SetSLTPRequest, AccountInfo } from '../services/api'
 import { useSimulationStore } from '../store/simulationStore'
 
 interface PositionPanelProps {
   refreshTrigger?: number
+  account?: AccountInfo | null
+  currentPrice?: number
 }
 
-function PositionPanel({ refreshTrigger }: PositionPanelProps) {
+function PositionPanel({ refreshTrigger, account, currentPrice }: PositionPanelProps) {
   const [positions, setPositions] = useState<Position[]>([])
   const [totalPnl, setTotalPnl] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -152,17 +154,7 @@ function PositionPanel({ refreshTrigger }: PositionPanelProps) {
         if (slType === 'price') {
           const price = parseFloat(slPrice)
           if (price > 0) {
-            // 価格指定の場合のバリデーション
-            if (editingPosition.side === 'buy' && price >= editingPosition.entry_price) {
-              alert('買いポジションのSL価格はエントリー価格より低く設定してください')
-              setIsSaving(false)
-              return
-            }
-            if (editingPosition.side === 'sell' && price <= editingPosition.entry_price) {
-              alert('売りポジションのSL価格はエントリー価格より高く設定してください')
-              setIsSaving(false)
-              return
-            }
+            // 価格指定の場合のバリデーション：正の価格のみ確認（方向の制約は削除）
             request.sl_price = price
           }
         } else {
@@ -179,17 +171,7 @@ function PositionPanel({ refreshTrigger }: PositionPanelProps) {
         if (tpType === 'price') {
           const price = parseFloat(tpPrice)
           if (price > 0) {
-            // 価格指定の場合のバリデーション
-            if (editingPosition.side === 'buy' && price <= editingPosition.entry_price) {
-              alert('買いポジションのTP価格はエントリー価格より高く設定してください')
-              setIsSaving(false)
-              return
-            }
-            if (editingPosition.side === 'sell' && price >= editingPosition.entry_price) {
-              alert('売りポジションのTP価格はエントリー価格より低く設定してください')
-              setIsSaving(false)
-              return
-            }
+            // 価格指定の場合のバリデーション：正の価格のみ確認（方向の制約は削除）
             request.tp_price = price
           }
         } else {
@@ -238,6 +220,13 @@ function PositionPanel({ refreshTrigger }: PositionPanelProps) {
           {positions.length > 0 && (
             <span className="text-base text-text-secondary">
               使用証拠金: ¥{totalMargin.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              {account?.margin_available !== undefined && currentPrice && currentPrice > 0 && (
+                <>
+                  {' 　'} (残証拠金: ¥{account.margin_available.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                  {' / '}
+                  {((account.margin_available * 25) / currentPrice).toLocaleString(undefined, { maximumFractionDigits: 0 })}通貨)
+                </>
+              )}
             </span>
           )}
           <span className={`text-lg font-semibold ${totalPnl >= 0 ? 'text-buy' : 'text-sell'}`}>

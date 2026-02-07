@@ -131,13 +131,28 @@ function AnalysisPage() {
         layout: {
           background: { color: '#1a1a1a' },
           textColor: '#d1d4dc',
+          fontSize: 16,
         },
         grid: {
           vertLines: { color: '#2a2a2a' },
           horzLines: { color: '#2a2a2a' },
         },
+        localization: {
+          // 時刻表示を yyyy/mm/dd HH:mm 形式にカスタマイズ
+          timeFormatter: (timestamp: number) => {
+            const date = new Date(timestamp * 1000)
+            const year = date.getUTCFullYear()
+            const month = String(date.getUTCMonth() + 1).padStart(2, '0')
+            const day = String(date.getUTCDate()).padStart(2, '0')
+            const hour = String(date.getUTCHours()).padStart(2, '0')
+            const minute = String(date.getUTCMinutes()).padStart(2, '0')
+            return `${year}/${month}/${day} ${hour}:${minute}`
+          },
+        },
         timeScale: {
           borderColor: '#485c7b',
+          timeVisible: true, // すべてのタイムフレームで時刻を表示
+          secondsVisible: false,
         },
       })
 
@@ -240,7 +255,7 @@ function AnalysisPage() {
               position: trade.side === 'buy' ? 'belowBar' : 'aboveBar',
               color: trade.side === 'buy' ? '#26a69a' : '#ef5350',
               shape: trade.side === 'buy' ? 'arrowUp' : 'arrowDown',
-              text: `${trade.side === 'buy' ? 'Buy' : 'Sell'} @ ${trade.entry_price}`,
+              text: `${trade.side === 'buy' ? '買' : '売'}\n${trade.entry_price.toFixed(3)}`,
             },
             // Exit marker
             {
@@ -248,7 +263,7 @@ function AnalysisPage() {
               position: trade.realized_pnl >= 0 ? 'aboveBar' : 'belowBar',
               color: trade.realized_pnl >= 0 ? '#26a69a' : '#ef5350',
               shape: 'circle',
-              text: `Exit @ ${trade.exit_price} (${trade.realized_pnl >= 0 ? '+' : ''}¥${trade.realized_pnl.toLocaleString()})`,
+              text: `${trade.exit_price.toFixed(3)}（${trade.realized_pnl >= 0 ? '+' : ''}${trade.realized_pnl_pips.toFixed(1)}p：${trade.realized_pnl >= 0 ? '+' : ''}¥${trade.realized_pnl.toLocaleString()}）`,
             },
           ]
         })
@@ -484,6 +499,73 @@ function AnalysisPage() {
             </div>
           )}
         </div>
+
+        {/* トレード履歴テーブル */}
+        {trades.length > 0 && (
+          <div className="bg-bg-card rounded-lg p-6 border border-border">
+            <h2 className="text-xl font-semibold text-text-strong mb-4">トレード履歴</h2>
+            <div className="overflow-x-auto max-h-[400px] overflow-y-auto border border-border rounded">
+              <table className="w-full text-sm">
+                <thead className="bg-bg-primary sticky top-0">
+                  <tr className="border-b border-border">
+                    <th className="px-3 py-2 text-left text-text-secondary font-semibold">エントリー日時</th>
+                    <th className="px-3 py-2 text-left text-text-secondary font-semibold">決済日時</th>
+                    <th className="px-3 py-2 text-center text-text-secondary font-semibold">売買</th>
+                    <th className="px-3 py-2 text-right text-text-secondary font-semibold">ロット</th>
+                    <th className="px-3 py-2 text-right text-text-secondary font-semibold">エントリー</th>
+                    <th className="px-3 py-2 text-right text-text-secondary font-semibold">決済</th>
+                    <th className="px-3 py-2 text-right text-text-secondary font-semibold">損益(JPY)</th>
+                    <th className="px-3 py-2 text-right text-text-secondary font-semibold">損益(pips)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trades.map((trade, index) => (
+                    <tr key={trade.trade_id || index} className="border-b border-border hover:bg-bg-secondary">
+                      <td className="px-3 py-2 text-text-primary">
+                        {new Date(trade.opened_at).toLocaleString('ja-JP', {
+                          year: 'numeric',
+                          month: '2-digit',
+                          day: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </td>
+                      <td className="px-3 py-2 text-text-primary">
+                        {new Date(trade.closed_at).toLocaleString('ja-JP', {
+                          year: 'numeric',
+                          month: '2-digit',
+                          day: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <span className={`px-2 py-1 rounded text-xs font-bold ${
+                          trade.side === 'buy' ? 'bg-buy bg-opacity-20 text-buy' : 'bg-sell bg-opacity-20 text-sell'
+                        }`}>
+                          {trade.side === 'buy' ? '買い' : '売り'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right text-text-primary">{trade.lot_size}</td>
+                      <td className="px-3 py-2 text-right text-text-primary">{trade.entry_price.toFixed(3)}</td>
+                      <td className="px-3 py-2 text-right text-text-primary">{trade.exit_price.toFixed(3)}</td>
+                      <td className={`px-3 py-2 text-right font-bold ${
+                        trade.realized_pnl >= 0 ? 'text-buy' : 'text-sell'
+                      }`}>
+                        {trade.realized_pnl >= 0 ? '+' : ''}¥{trade.realized_pnl.toLocaleString()}
+                      </td>
+                      <td className={`px-3 py-2 text-right font-bold ${
+                        trade.realized_pnl_pips >= 0 ? 'text-buy' : 'text-sell'
+                      }`}>
+                        {trade.realized_pnl_pips >= 0 ? '+' : ''}{trade.realized_pnl_pips.toFixed(1)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* 主要指標カード */}
         {performance && performance.basic.total_trades > 0 ? (

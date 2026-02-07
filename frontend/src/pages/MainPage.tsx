@@ -10,7 +10,7 @@ import AccountInfo from '../components/AccountInfo'
 import SimulationSettingsModal from '../components/SimulationSettingsModal'
 import SimulationResultModal from '../components/SimulationResultModal'
 import { useSimulationStore } from '../store/simulationStore'
-import { marketDataApi, simulationApi } from '../services/api'
+import { marketDataApi, simulationApi, accountApi, AccountInfo as AccountInfoType } from '../services/api'
 
 /**
  * シミュレーション速度の基準値
@@ -31,6 +31,7 @@ function MainPage() {
   const [isResultOpen, setIsResultOpen] = useState(false)
   const [currentPrice, setCurrentPrice] = useState(0)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
+  const [account, setAccount] = useState<AccountInfoType | null>(null)
   // チャート更新用のキー（シミュレーションID変更時にチャートを再作成）
   const [chartKey, setChartKey] = useState(0)
   // チャート間で同期されたクロスヘア位置（時刻）
@@ -187,6 +188,35 @@ function MainPage() {
   useEffect(() => {
     fetchCurrentPrice()
   }, [fetchCurrentPrice])
+
+  // 口座情報を取得
+  const fetchAccount = useCallback(async () => {
+    if (status === 'idle') return
+
+    try {
+      const res = await accountApi.get()
+      if (res.success && res.data) {
+        setAccount(res.data)
+      }
+    } catch (error) {
+      console.error('Failed to fetch account:', error)
+    }
+  }, [status])
+
+  useEffect(() => {
+    fetchAccount()
+  }, [fetchAccount, refreshTrigger])
+
+  // 定期的に口座情報を更新（5秒ごと）
+  useEffect(() => {
+    if (status !== 'running') return
+
+    const interval = setInterval(() => {
+      fetchAccount()
+    }, 5000)
+
+    return () => clearInterval(interval)
+  }, [status, fetchAccount])
 
   const handleDataManagement = () => {
     navigate('/data')
@@ -348,7 +378,11 @@ function MainPage() {
         {/* Position, Pending Orders & Account */}
         <div className="flex-1 grid grid-cols-10 gap-2 p-2 overflow-hidden">
           <div className="col-span-4 overflow-hidden">
-            <PositionPanel refreshTrigger={refreshTrigger} />
+            <PositionPanel
+              refreshTrigger={refreshTrigger}
+              account={account}
+              currentPrice={currentPrice}
+            />
           </div>
           <div className="col-span-3 overflow-hidden">
             <PendingOrderPanel refreshTrigger={refreshTrigger} />
