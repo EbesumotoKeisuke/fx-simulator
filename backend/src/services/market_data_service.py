@@ -414,15 +414,16 @@ class MarketDataService:
             partial_candle = self.generate_partial_candle(timeframe, latest_candle_start, current_time)
             return [partial_candle] if partial_candle else []
 
-        # 2.5. 日足の場合、タイムスタンプが7:00未満のローソク足は前日のデータとして扱う
+        # 2.5. 日足の場合、タイムスタンプが7:00未満のローソク足の時刻を7:00に調整
+        # （日付は変更しない - FXの日足は7:00 JSTから始まるため）
         if timeframe == 'D1':
             adjusted_candles = []
             for c in all_candles:
                 candle_time = datetime.fromisoformat(c['timestamp'])
-                # タイムスタンプが7:00未満の場合、前日の7:00に調整
-                # 例：4/1 0:00 → 3/31 7:00（3/31の日足データ）
+                # タイムスタンプが7:00未満の場合、同日の7:00に調整
+                # 例：4/1 0:00 → 4/1 7:00（日付は変えない）
                 if candle_time.hour < 7:
-                    adjusted_time = (candle_time - timedelta(days=1)).replace(hour=7, minute=0, second=0, microsecond=0)
+                    adjusted_time = candle_time.replace(hour=7, minute=0, second=0, microsecond=0)
                     c_adjusted = c.copy()
                     c_adjusted['timestamp'] = adjusted_time.isoformat()
                     adjusted_candles.append(c_adjusted)
