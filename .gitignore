@@ -32,6 +32,9 @@ Thumbs.db
 data/*.csv
 *.log
 
+# Unfinished specifications
+docs/F-006_Chart_Rewind_Specification.md
+
 # Build outputs
 frontend/dist/
 backend/*.egg-info/
