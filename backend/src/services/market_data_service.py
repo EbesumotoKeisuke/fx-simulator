@@ -13,12 +13,56 @@
 """
 
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, List
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from src.models.candle import Candle
+
+
+def is_market_open(timestamp: datetime) -> bool:
+    """
+    FX市場が営業しているかをチェックする
+
+    FX市場の営業時間：
+    - 月曜日 7:00 (JST) ～ 土曜日 早朝（概ね6:00-7:00）
+    - 日曜日は休場
+
+    Args:
+        timestamp: チェックする日時
+
+    Returns:
+        bool: 市場が営業している場合True
+    """
+    # 日曜日は完全に休場
+    if timestamp.weekday() == 6:  # Sunday = 6
+        return False
+
+    # 土曜日は7:00以降は休場
+    if timestamp.weekday() == 5:  # Saturday = 5
+        if timestamp.hour >= 7:
+            return False
+
+    # 月曜日は7:00より前は休場
+    if timestamp.weekday() == 0:  # Monday = 0
+        if timestamp.hour < 7:
+            return False
+
+    return True
+
+
+def filter_market_hours(candles: List[Candle]) -> List[Candle]:
+    """
+    市場営業時間外のローソク足データをフィルタリングする
+
+    Args:
+        candles: ローソク足データのリスト
+
+    Returns:
+        List[Candle]: 営業時間内のローソク足データのみのリスト
+    """
+    return [c for c in candles if is_market_open(c.timestamp)]
 
 
 class MarketDataService:
@@ -52,6 +96,7 @@ class MarketDataService:
 
         指定された時間足のローソク足データを時系列順（昇順）で取得する。
         開始時刻・終了時刻でフィルタリング可能。
+        日曜日のデータは除外される。
 
         Args:
             timeframe (str): 時間足（'W1', 'D1', 'H1', 'M10'）
@@ -70,8 +115,14 @@ class MarketDataService:
         if end_time:
             query = query.filter(Candle.timestamp <= end_time)
 
-        query = query.order_by(Candle.timestamp.asc()).limit(limit)
+        query = query.order_by(Candle.timestamp.asc()).limit(limit * 2)  # 日曜日除外を考慮して多めに取得
         candles = query.all()
+
+        # 市場営業時間外のデータを除外
+        candles = filter_market_hours(candles)
+
+        # limit件に制限
+        candles = candles[:limit]
 
         return [
             {
@@ -96,6 +147,7 @@ class MarketDataService:
 
         シミュレーション画面でチャートを表示する際に使用。
         指定時刻以前のデータを取得し、時系列順（昇順）で返す。
+        日曜日のデータは除外される。
 
         Args:
             timeframe (str): 時間足（'W1', 'D1', 'H1', 'M10'）
@@ -110,9 +162,15 @@ class MarketDataService:
             .filter(Candle.timeframe == timeframe)
             .filter(Candle.timestamp <= before_time)
             .order_by(Candle.timestamp.desc())
-            .limit(limit)
+            .limit(limit * 2)  # 日曜日除外を考慮して多めに取得
         )
         candles = query.all()
+
+        # 市場営業時間外のデータを除外
+        candles = filter_market_hours(candles)
+
+        # limit件に制限
+        candles = candles[:limit]
 
         # 時系列順に並び替え
         candles.reverse()
@@ -349,6 +407,9 @@ class MarketDataService:
             .order_by(Candle.timestamp.asc())
             .all()
         )
+
+        # 市場営業時間外のデータを除外
+        source_candles = filter_market_hours(source_candles)
 
         # 元データが0件の場合はNoneを返す
         if not source_candles:

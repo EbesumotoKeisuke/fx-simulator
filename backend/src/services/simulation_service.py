@@ -427,6 +427,9 @@ class SimulationService:
         """
         指定時刻以降の次の利用可能なデータを探す（週末スキップ用）
 
+        FX市場の営業時間（月曜7:00～土曜早朝）のデータのみを返す。
+        日曜日のデータは自動的にスキップされる。
+
         Args:
             timeframe (str): 時間足（通常は'M10'）
             after_time (datetime): この時刻より後のデータを探す
@@ -436,15 +439,27 @@ class SimulationService:
             Optional[dict]: 次のローソク足データ、見つからない場合はNone
         """
         from ..models.candle import Candle
+        from .market_data_service import is_market_open
 
-        # after_time より後の最初のデータを取得
-        next_candle = (
+        # after_time より後の最初のデータを取得（市場営業時間内のみ）
+        # 最大100件まで検索して、営業時間内のものを探す
+        candidates = (
             self.db.query(Candle)
             .filter(Candle.timeframe == timeframe)
             .filter(Candle.timestamp > after_time)
             .order_by(Candle.timestamp.asc())
-            .first()
+            .limit(100)
+            .all()
         )
+
+        # 営業時間内の最初のデータを探す
+        for candle in candidates:
+            if is_market_open(candle.timestamp):
+                next_candle = candle
+                break
+        else:
+            # 営業時間内のデータが見つからなかった
+            return None
 
         if next_candle:
             return {
