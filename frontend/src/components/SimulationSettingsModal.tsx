@@ -102,6 +102,8 @@ function SimulationSettingsModal({ isOpen, onClose }: SimulationSettingsModalPro
         parseFloat(initialBalance),
         parseFloat(speed)
       )
+      // モーダルを閉じる（'created'状態のまま）
+      // ユーザーが「開始」ボタンをクリックしてシミュレーションを開始する
       onClose()
     } catch (error) {
       setError(`エラー: ${error}`)

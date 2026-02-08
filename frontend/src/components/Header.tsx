@@ -47,8 +47,7 @@ function Header({ currentTime, status, onDataManagement, onAnalysis, onSettings,
         >
           設定
         </button>
-        {(status === 'created' || status === 'paused' || status === 'stopped') && (
-        // {(status === 'idle' || status === 'created' || status === 'paused' || status === 'stopped') && (
+        {status !== 'running' && (
           <button
             onClick={onStart}
             className="px-4 py-1 bg-buy text-text-strong rounded text-sm hover:opacity-80"
