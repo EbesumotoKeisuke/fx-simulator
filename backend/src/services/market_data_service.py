@@ -52,16 +52,25 @@ def is_market_open(timestamp: datetime) -> bool:
     return True
 
 
-def filter_market_hours(candles: List[Candle]) -> List[Candle]:
+def filter_market_hours(candles: List[Candle], timeframe: str = 'M10') -> List[Candle]:
     """
     市場営業時間外のローソク足データをフィルタリングする
 
+    注意: W1（週足）とD1（日足）は1本のローソク足が長い期間を表すため、
+    市場営業時間フィルタリングをスキップする。
+    H1（1時間足）とM10（10分足）のみフィルタリングを適用する。
+
     Args:
         candles: ローソク足データのリスト
+        timeframe: 時間足（'W1', 'D1', 'H1', 'M10'）
 
     Returns:
         List[Candle]: 営業時間内のローソク足データのみのリスト
     """
+    # 週足と日足は市場時間フィルタリングをスキップ
+    if timeframe in ('W1', 'D1'):
+        return candles
+
     return [c for c in candles if is_market_open(c.timestamp)]
 
 
@@ -118,8 +127,8 @@ class MarketDataService:
         query = query.order_by(Candle.timestamp.asc()).limit(limit * 2)  # 日曜日除外を考慮して多めに取得
         candles = query.all()
 
-        # 市場営業時間外のデータを除外
-        candles = filter_market_hours(candles)
+        # 市場営業時間外のデータを除外（週足・日足はスキップ）
+        candles = filter_market_hours(candles, timeframe)
 
         # limit件に制限
         candles = candles[:limit]
@@ -166,8 +175,8 @@ class MarketDataService:
         )
         candles = query.all()
 
-        # 市場営業時間外のデータを除外
-        candles = filter_market_hours(candles)
+        # 市場営業時間外のデータを除外（週足・日足はスキップ）
+        candles = filter_market_hours(candles, timeframe)
 
         # limit件に制限
         candles = candles[:limit]
@@ -408,8 +417,8 @@ class MarketDataService:
             .all()
         )
 
-        # 市場営業時間外のデータを除外
-        source_candles = filter_market_hours(source_candles)
+        # 市場営業時間外のデータを除外（週足・日足はスキップ）
+        source_candles = filter_market_hours(source_candles, source_timeframe)
 
         # 元データが0件の場合はNoneを返す
         if not source_candles:
@@ -430,7 +439,7 @@ class MarketDataService:
         timeframe: str,
         current_time: datetime,
         limit: int = 100,
-    ) -> list[dict]:
+    ) -> tuple[list[dict], bool]:
         """
         最新のローソク足を部分的に生成して返す（未来データ非表示対応）
 
@@ -447,22 +456,24 @@ class MarketDataService:
             limit (int, optional): 取得件数上限。デフォルトは100
 
         Returns:
-            list[dict]: ローソク足データのリスト（時系列順）
+            tuple[list[dict], bool]: (ローソク足データのリスト, データ不足フラグ)
                 最新のローソク足は動的生成されたもの
+                データ不足フラグは、DBに該当時間足のデータが存在しない場合にTrue
 
         Examples:
             >>> # 1時間足を取得（current_time = 12:30）
             >>> get_candles_with_partial_last('H1', datetime(2024, 12, 30, 12, 30), limit=10)
-            [
+            ([
                 # 11:00台までは完全なOHLC
                 {'timestamp': '2024-12-30T11:00:00', 'open': 145.20, ...},
                 # 12:00台は12:00〜12:30のみのOHLC（動的生成）
                 {'timestamp': '2024-12-30T12:00:00', 'open': 145.50, ...}
-            ]
+            ], False)
         """
         # 10分足は最小単位なので、動的生成は不要（既存ロジックをそのまま使用）
         if timeframe == 'M10':
-            return self.get_candles_before(timeframe, current_time, limit)
+            candles = self.get_candles_before(timeframe, current_time, limit)
+            return candles, len(candles) == 0
 
         # 1. 最新のローソク足の開始時刻を計算
         latest_candle_start = self.calculate_candle_start_time(timeframe, current_time)
@@ -470,10 +481,12 @@ class MarketDataService:
         # 2. current_time以前の全てのローソク足を取得（旧APIと同じ）
         all_candles = self.get_candles_before(timeframe, current_time, limit)
 
+        # データ不足フラグ: DBに該当時間足のデータが存在しない場合にTrue
+        data_missing = len(all_candles) == 0
+
         if not all_candles:
-            # データが0件の場合、最新のローソク足のみを生成して返す
-            partial_candle = self.generate_partial_candle(timeframe, latest_candle_start, current_time)
-            return [partial_candle] if partial_candle else []
+            # データが0件の場合、空のリストを返す（自動生成しない）
+            return [], True
 
         # 2.5. 日足の場合、タイムスタンプが7:00未満のローソク足の時刻を7:00に調整
         # （日付は変更しない - FXの日足は7:00 JSTから始まるため）
@@ -504,4 +517,4 @@ class MarketDataService:
         if partial_candle:
             filtered_candles.append(partial_candle)
 
-        return filtered_candles
+        return filtered_candles, data_missing

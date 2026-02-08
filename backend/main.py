@@ -2,16 +2,35 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text, inspect
 
 from src.routes import market_data, simulation, orders, positions, account, trades, analytics, alerts
 from src.utils.database import engine, Base
 from src.models import candle, simulation as sim_model, account as acc_model, order, position, trade, pending_order
 
 
+def run_migrations():
+    """既存テーブルに対するマイグレーションを実行する"""
+    inspector = inspect(engine)
+
+    # accountsテーブルにconsecutive_lossesカラムを追加
+    if 'accounts' in inspector.get_table_names():
+        columns = [col['name'] for col in inspector.get_columns('accounts')]
+        if 'consecutive_losses' not in columns:
+            with engine.connect() as conn:
+                conn.execute(text(
+                    "ALTER TABLE accounts ADD COLUMN consecutive_losses INTEGER NOT NULL DEFAULT 0"
+                ))
+                conn.commit()
+                print("Migration: Added consecutive_losses column to accounts table")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 起動時: テーブル作成
     Base.metadata.create_all(bind=engine)
+    # マイグレーション実行
+    run_migrations()
     yield
     # 終了時: 特に処理なし
 

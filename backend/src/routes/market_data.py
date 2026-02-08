@@ -74,18 +74,23 @@ async def get_candles_partial(
     これにより、上位時間足で未来のデータが表示されることを防ぐ。
     例：current_time が 12:30 の場合、1時間足の 12:00 台のローソク足は
     12:00〜12:30 のデータのみから生成される。
+
+    Returns:
+        - candles: ローソク足データのリスト
+        - data_missing: DBに該当時間足のデータが存在しない場合にTrue
     """
     if timeframe not in ["W1", "D1", "H1", "M10"]:
         raise HTTPException(status_code=400, detail=f"Invalid timeframe: {timeframe}")
 
     service = MarketDataService(db)
-    candles = service.get_candles_with_partial_last(timeframe, current_time, limit)
+    candles, data_missing = service.get_candles_with_partial_last(timeframe, current_time, limit)
 
     return {
         "success": True,
         "data": {
             "timeframe": timeframe,
             "candles": candles,
+            "data_missing": data_missing,
         },
     }
 

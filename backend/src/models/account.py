@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DECIMAL, TIMESTAMP, ForeignKey
+from sqlalchemy import Column, DECIMAL, TIMESTAMP, ForeignKey, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -16,6 +16,7 @@ class Account(Base):
     balance = Column(DECIMAL(15, 2), nullable=False)
     equity = Column(DECIMAL(15, 2), nullable=False)
     realized_pnl = Column(DECIMAL(15, 2), nullable=False, default=0)
+    consecutive_losses = Column(Integer, nullable=False, default=0)
     updated_at = Column(TIMESTAMP, nullable=False, server_default=func.now(), onupdate=func.now())
 
     simulation = relationship("Simulation", backref="account")
