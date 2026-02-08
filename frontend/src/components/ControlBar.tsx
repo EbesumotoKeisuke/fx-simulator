@@ -15,6 +15,14 @@ interface ControlBarProps {
   currentPrice: number
   /** データ更新時のコールバック */
   onRefresh?: () => void
+  /** ロット数量（外部から制御する場合） */
+  lotQuantity?: string
+  /** ロット単位（外部から制御する場合） */
+  lotUnit?: string
+  /** ロット数量変更時のコールバック */
+  onLotQuantityChange?: (value: string) => void
+  /** ロット単位変更時のコールバック */
+  onLotUnitChange?: (value: string) => void
 }
 
 /**
@@ -24,9 +32,36 @@ interface ControlBarProps {
  * @param currentPrice - 現在の為替レート
  * @param onRefresh - 注文後にデータを更新するためのコールバック
  */
-function ControlBar({ currentPrice, onRefresh }: ControlBarProps) {
-  const [lotQuantity, setLotQuantity] = useState('1')
-  const [lotUnit, setLotUnit] = useState('10000')
+function ControlBar({
+  currentPrice,
+  onRefresh,
+  lotQuantity: externalLotQuantity,
+  lotUnit: externalLotUnit,
+  onLotQuantityChange,
+  onLotUnitChange
+}: ControlBarProps) {
+  const [internalLotQuantity, setInternalLotQuantity] = useState('1')
+  const [internalLotUnit, setInternalLotUnit] = useState('10000')
+
+  // 外部制御がある場合は外部の値を使用、なければ内部stateを使用
+  const lotQuantity = externalLotQuantity !== undefined ? externalLotQuantity : internalLotQuantity
+  const lotUnit = externalLotUnit !== undefined ? externalLotUnit : internalLotUnit
+
+  const setLotQuantity = (value: string) => {
+    if (onLotQuantityChange) {
+      onLotQuantityChange(value)
+    } else {
+      setInternalLotQuantity(value)
+    }
+  }
+
+  const setLotUnit = (value: string) => {
+    if (onLotUnitChange) {
+      onLotUnitChange(value)
+    } else {
+      setInternalLotUnit(value)
+    }
+  }
   const [isOrdering, setIsOrdering] = useState(false)
   const [orderMessage, setOrderMessage] = useState<string | null>(null)
 
