@@ -363,22 +363,34 @@ class SimulationService:
                 return {"error": "Simulation is not running"}
 
             # 新しい時刻でM10データが存在するかチェック（週末スキップ機能）
-            from .market_data_service import MarketDataService
+            from .market_data_service import MarketDataService, is_market_open
             market_data_service = MarketDataService(self.db)
 
-            # 指定時刻の±5分以内にデータがあるかチェック
-            candles = market_data_service.get_candles_before('M10', new_time, 1)
             skipped = False
 
-            if not candles or (candles and abs((datetime.fromisoformat(candles[0]['timestamp']) - new_time).total_seconds()) > 600):
-                # データがない、または最新データが10分以上離れている場合、次のデータを探す
+            # まず、市場営業時間外かどうかをチェック
+            if not is_market_open(new_time):
+                # 市場営業時間外の場合、次の営業時間のデータを探す
                 next_data = self._find_next_available_data('M10', new_time, market_data_service)
                 if next_data:
                     new_time = datetime.fromisoformat(next_data['timestamp'])
                     skipped = True
-                    print(f"[advance_time] Weekend detected, skipped to {new_time.isoformat()}")
+                    print(f"[advance_time] Market closed, skipped to {new_time.isoformat()}")
                 else:
                     return {"error": "No more data available - simulation reached end of data"}
+            else:
+                # 市場営業時間内の場合、データが存在するかチェック
+                candles = market_data_service.get_candles_before('M10', new_time, 1)
+
+                if not candles or (candles and abs((datetime.fromisoformat(candles[0]['timestamp']) - new_time).total_seconds()) > 600):
+                    # データがない、または最新データが10分以上離れている場合、次のデータを探す
+                    next_data = self._find_next_available_data('M10', new_time, market_data_service)
+                    if next_data:
+                        new_time = datetime.fromisoformat(next_data['timestamp'])
+                        skipped = True
+                        print(f"[advance_time] Data gap detected, skipped to {new_time.isoformat()}")
+                    else:
+                        return {"error": "No more data available - simulation reached end of data"}
 
             simulation.current_time = new_time
 
