@@ -496,6 +496,16 @@ class TradingService:
         account.balance += Decimal(str(round(realized_pnl, 2)))
         account.realized_pnl += Decimal(str(round(realized_pnl, 2)))
 
+        # 連敗カウント更新
+        # 損失トレード → カウント+1
+        # 30pips以上の利益 → リセット
+        # 30pips未満の利益 → 維持
+        if pnl_pips < 0:
+            account.consecutive_losses += 1
+        elif pnl_pips >= 30:
+            account.consecutive_losses = 0
+        # 0 <= pnl_pips < 30 の場合は何もしない（維持）
+
         self.db.commit()
 
         return {
@@ -536,6 +546,7 @@ class TradingService:
                 "initial_balance": 0,
                 "margin_used": 0,
                 "margin_available": 0,
+                "consecutive_losses": 0,
             }
 
         account = self._get_account(simulation.id)
@@ -548,6 +559,7 @@ class TradingService:
                 "initial_balance": 0,
                 "margin_used": 0,
                 "margin_available": 0,
+                "consecutive_losses": 0,
             }
 
         # 含み損益を計算
@@ -588,6 +600,7 @@ class TradingService:
             "initial_balance": float(account.initial_balance),
             "margin_used": round(margin_used, 2),
             "margin_available": round(margin_available, 2),
+            "consecutive_losses": account.consecutive_losses,
         }
 
     def get_trades(self, limit: int = 50, offset: int = 0) -> dict:
@@ -1189,3 +1202,13 @@ class TradingService:
         if account:
             account.balance += Decimal(str(round(realized_pnl, 2)))
             account.realized_pnl += Decimal(str(round(realized_pnl, 2)))
+
+            # 連敗カウント更新
+            # 損失トレード → カウント+1
+            # 30pips以上の利益 → リセット
+            # 30pips未満の利益 → 維持
+            if pnl_pips < 0:
+                account.consecutive_losses += 1
+            elif pnl_pips >= 30:
+                account.consecutive_losses = 0
+            # 0 <= pnl_pips < 30 の場合は何もしない（維持）

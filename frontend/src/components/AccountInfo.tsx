@@ -114,6 +114,36 @@ function AccountInfo({ refreshTrigger }: AccountInfoProps) {
             <span className="text-text-secondary ml-2">({profitLossPercent}%)</span>
           </span>
         </div>
+
+        {/* 連敗状況 */}
+        {account.consecutive_losses !== undefined && (
+          <div
+            className={`mt-2 px-3 py-2 rounded ${
+              account.consecutive_losses === 0
+                ? 'bg-buy/20'
+                : account.consecutive_losses <= 2
+                ? 'bg-yellow-900/20'
+                : 'bg-sell/20'
+            }`}
+          >
+            <span
+              className={`text-base font-semibold ${
+                account.consecutive_losses === 0
+                  ? 'text-buy'
+                  : account.consecutive_losses <= 2
+                  ? 'text-yellow-500'
+                  : 'text-sell'
+              }`}
+            >
+              連敗: {account.consecutive_losses}回{' '}
+              {account.consecutive_losses === 0
+                ? '✓'
+                : account.consecutive_losses <= 2
+                ? '⚠️'
+                : '🚨'}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* パフォーマンス指標 */}

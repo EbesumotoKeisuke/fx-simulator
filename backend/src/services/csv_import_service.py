@@ -117,46 +117,61 @@ class CSVImportService:
         if df["timestamp"].dt.tz is not None:
             df["timestamp"] = df["timestamp"].dt.tz_convert("UTC").dt.tz_localize(None)
 
-        # 必要なカラムのみ抽出
-        records = []
-        for _, row in df.iterrows():
-            # Volumeの値を安全に変換（数値以外の文字が含まれる場合は除去）
-            volume_value = 0
-            if pd.notna(row["Volume"]):
-                try:
-                    # 文字列の場合は数字のみを抽出
-                    volume_str = str(row["Volume"])
-                    # 数字以外の文字を除去
-                    volume_numeric = ''.join(filter(str.isdigit, volume_str))
-                    volume_value = int(volume_numeric) if volume_numeric else 0
-                except (ValueError, TypeError):
-                    volume_value = 0
+        # 必要なカラムのみ抽出（ベクトル化された処理）
+        # Volumeの値を安全に変換（数値以外の文字が含まれる場合は除去）
+        def clean_volume(vol):
+            if pd.isna(vol):
+                return 0
+            try:
+                # 数値型の場合はそのまま使用
+                if isinstance(vol, (int, float)):
+                    return int(vol)
+                # 文字列の場合は数字のみを抽出
+                volume_str = str(vol)
+                volume_numeric = ''.join(filter(str.isdigit, volume_str))
+                return int(volume_numeric) if volume_numeric else 0
+            except (ValueError, TypeError):
+                return 0
 
-            records.append({
-                "timeframe": timeframe,
-                "timestamp": row["timestamp"],
-                "open": float(row["open"]),
-                "high": float(row["high"]),
-                "low": float(row["low"]),
-                "close": float(row["close"]),
-                "volume": volume_value,
-            })
+        # ベクトル化された処理で高速化
+        df["volume_clean"] = df["Volume"].apply(clean_volume)
 
-        # 一括UPSERT（重複は更新）
+        # 必要なカラムのみ選択してレコードを作成
+        records = df[[
+            "timestamp", "open", "high", "low", "close", "volume_clean"
+        ]].rename(columns={"volume_clean": "volume"}).to_dict("records")
+
+        # timeframeを追加
+        for record in records:
+            record["timeframe"] = timeframe
+
+        # バッチ処理で一括UPSERT（重複は更新）
+        # 大量のデータを一度に処理するとメモリを大量に消費するため、
+        # 10000件ずつに分割して処理する
+        BATCH_SIZE = 10000
+        total_records = len(records)
+
         if records:
-            stmt = insert(Candle).values(records)
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["timeframe", "timestamp"],
-                set_={
-                    "open": stmt.excluded.open,
-                    "high": stmt.excluded.high,
-                    "low": stmt.excluded.low,
-                    "close": stmt.excluded.close,
-                    "volume": stmt.excluded.volume,
-                }
-            )
-            self.db.execute(stmt)
-            self.db.commit()
+            for i in range(0, total_records, BATCH_SIZE):
+                batch = records[i:i + BATCH_SIZE]
+                stmt = insert(Candle).values(batch)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["timeframe", "timestamp"],
+                    set_={
+                        "open": stmt.excluded.open,
+                        "high": stmt.excluded.high,
+                        "low": stmt.excluded.low,
+                        "close": stmt.excluded.close,
+                        "volume": stmt.excluded.volume,
+                    }
+                )
+                self.db.execute(stmt)
+
+                # 各バッチ後にコミット
+                self.db.commit()
+
+                # 進行状況をログ出力
+                print(f"Imported {min(i + BATCH_SIZE, total_records)}/{total_records} records for {timeframe}")
 
         return {
             "timeframe": timeframe,

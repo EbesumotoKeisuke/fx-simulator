@@ -101,6 +101,8 @@ export interface Candle {
 export interface CandlesResponse {
   timeframe: string
   candles: Candle[]
+  /** データ不足フラグ（DBに該当時間足のデータが存在しない場合にTrue） */
+  data_missing?: boolean
 }
 
 export interface DateRangeResponse {
@@ -712,6 +714,8 @@ export interface AccountInfo {
   realized_pnl: number
   /** 初期資金（円） */
   initial_balance: number
+  /** 連敗数 */
+  consecutive_losses?: number
 }
 
 export const accountApi = {

@@ -68,6 +68,8 @@ interface ChartPanelProps {
   onActiveChange?: (chartId: string | null) => void
   /** データ更新トリガー（注文や決済が行われたときに変更される） */
   refreshTrigger?: number
+  /** データ不足通知コールバック（DBに該当時間足のデータが存在しない場合に呼ばれる） */
+  onDataMissing?: (timeframe: string) => void
 }
 
 /**
@@ -102,7 +104,8 @@ function ChartPanel({
   onCrosshairMove,
   activeChart,
   onActiveChange,
-  refreshTrigger
+  refreshTrigger,
+  onDataMissing
 }: ChartPanelProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
@@ -121,6 +124,8 @@ function ChartPanel({
   const [crosshairPosition, setCrosshairPosition] = useState<{ x: number; y: number } | null>(null)
   // データ取得中フラグ（複数リクエストの同時実行を防ぐ）
   const isFetchingRef = useRef(false)
+  // データ不足通知済みフラグ（同じ警告を複数回表示しないため）
+  const dataMissingNotifiedRef = useRef(false)
 
   /**
    * Convert a Date to fakeUTC timestamp (same logic as formatCandles)
@@ -292,6 +297,14 @@ function ChartPanel({
       }
 
       if (response.success && response.data) {
+        // データ不足チェック（DBに該当時間足のデータが存在しない場合）
+        if (response.data.data_missing && !dataMissingNotifiedRef.current) {
+          dataMissingNotifiedRef.current = true
+          if (onDataMissing) {
+            onDataMissing(timeframe)
+          }
+        }
+
         const formattedData = formatCandles(response.data.candles)
         const lastCandle = formattedData[formattedData.length - 1]
         const newLastTime = lastCandle?.time as string | number | undefined
@@ -303,7 +316,8 @@ function ChartPanel({
           lastTime: newLastTime,
           prevLastTime: prevLastTime,
           currentTime: currentTime ? toLocalISOString(currentTime) : 'null',
-          isNewCandle: newLastTime !== prevLastTime
+          isNewCandle: newLastTime !== prevLastTime,
+          dataMissing: response.data.data_missing
         })
 
         if (formattedData.length > 0) {
@@ -358,7 +372,7 @@ function ChartPanel({
       isFetchingRef.current = false
     }
 
-  }, [timeframe, currentTime])
+  }, [timeframe, currentTime, onDataMissing])
 
   /**
    * トレードマーカーを更新する（内部使用）
