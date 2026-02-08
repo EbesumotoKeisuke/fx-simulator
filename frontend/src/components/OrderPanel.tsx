@@ -1,18 +1,55 @@
 import { useState } from 'react'
-import { ordersApi, PendingOrderRequest } from '../services/api'
+import { ordersApi, PendingOrderRequest, AccountInfo } from '../services/api'
 import { useSimulationStore } from '../store/simulationStore'
 import LoadingSpinner from './LoadingSpinner'
 
 interface OrderPanelProps {
   currentPrice: number
+  account?: AccountInfo | null
   onRefresh?: () => void
+  /** ロット数量（外部から制御する場合） */
+  lotQuantity?: string
+  /** ロット単位（外部から制御する場合） */
+  lotUnit?: string
+  /** ロット数量変更時のコールバック */
+  onLotQuantityChange?: (value: string) => void
+  /** ロット単位変更時のコールバック */
+  onLotUnitChange?: (value: string) => void
 }
 
-function OrderPanel({ currentPrice, onRefresh }: OrderPanelProps) {
+function OrderPanel({
+  currentPrice,
+  account,
+  onRefresh,
+  lotQuantity: externalLotQuantity,
+  lotUnit: externalLotUnit,
+  onLotQuantityChange,
+  onLotUnitChange
+}: OrderPanelProps) {
   const [orderType, setOrderType] = useState<'market' | 'limit' | 'stop'>('market')
   const [side, setSide] = useState<'buy' | 'sell'>('buy')
-  const [lotQuantity, setLotQuantity] = useState('1')
-  const [lotUnit, setLotUnit] = useState('10000')
+  const [internalLotQuantity, setInternalLotQuantity] = useState('1')
+  const [internalLotUnit, setInternalLotUnit] = useState('10000')
+
+  // 外部制御がある場合は外部の値を使用、なければ内部stateを使用
+  const lotQuantity = externalLotQuantity !== undefined ? externalLotQuantity : internalLotQuantity
+  const lotUnit = externalLotUnit !== undefined ? externalLotUnit : internalLotUnit
+
+  const setLotQuantity = (value: string) => {
+    if (onLotQuantityChange) {
+      onLotQuantityChange(value)
+    } else {
+      setInternalLotQuantity(value)
+    }
+  }
+
+  const setLotUnit = (value: string) => {
+    if (onLotUnitChange) {
+      onLotUnitChange(value)
+    } else {
+      setInternalLotUnit(value)
+    }
+  }
   const [triggerPrice, setTriggerPrice] = useState('')
   const [enableSL, setEnableSL] = useState(false)
   const [enableTP, setEnableTP] = useState(false)
@@ -144,6 +181,33 @@ function OrderPanel({ currentPrice, onRefresh }: OrderPanelProps) {
     return pips
   }
 
+  // 1%リスクロットサイズを計算
+  const calculateRiskBasedLotSize = (balance: number, slPips: number): number => {
+    const RISK_RATE = 0.01 // 1%
+    const PIP_VALUE_PER_UNIT = 0.01 // 1通貨あたり0.01円
+
+    // ロットサイズ = (資産 × リスク率) / (SL pips × 1pip値)
+    const lotSize = (balance * RISK_RATE) / (slPips * PIP_VALUE_PER_UNIT)
+
+    // 1,000通貨未満は切り捨て
+    return Math.floor(lotSize / 1000) * 1000
+  }
+
+  // 表示用フォーマット（k単位）
+  const formatLotSize = (lotSize: number): string => {
+    const k = Math.floor(lotSize / 1000)
+    return `${k}k`
+  }
+
+  // プリセット定義
+  const LOT_PRESETS = [
+    { slPips: 10, label: '10p' },
+    { slPips: 20, label: '20p' },
+    { slPips: 30, label: '30p' },
+    { slPips: 40, label: '40p' },
+    { slPips: 50, label: '50p' },
+  ]
+
   return (
     <div className="bg-bg-card border-t border-border p-3">
       <div className="flex flex-col gap-2">
@@ -252,6 +316,39 @@ function OrderPanel({ currentPrice, onRefresh }: OrderPanelProps) {
             {isOrdering && <LoadingSpinner size="sm" />}
             {isOrdering ? '処理中...' : '注文'}
           </button>
+
+          {/* 1%リスクプリセット（注文ボタンの横に配置） */}
+          {account && orderType === 'market' && (
+            <div className="flex items-center gap-2 pl-2 border-l border-border">
+              <span className="text-xs text-text-secondary whitespace-nowrap">
+                1%リスク(¥{(account.balance / 1000).toFixed(0)}k):
+              </span>
+              <div className="flex gap-1">
+                {LOT_PRESETS.map(preset => {
+                  const lotSize = calculateRiskBasedLotSize(
+                    account.balance,
+                    preset.slPips
+                  )
+                  const quantity = lotSize / 10000
+
+                  return (
+                    <button
+                      key={preset.slPips}
+                      type="button"
+                      onClick={() => {
+                        setLotQuantity(String(quantity))
+                        setLotUnit('10000')
+                      }}
+                      className="px-1.5 py-0.5 bg-bg-primary border border-border rounded text-xs hover:bg-border"
+                    >
+                      <span className="font-semibold">{preset.label}</span>
+                      <span className="text-text-secondary ml-0.5">{formatLotSize(lotSize)}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           {/* メッセージ表示 */}
           {message && (

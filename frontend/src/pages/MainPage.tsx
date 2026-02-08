@@ -42,6 +42,11 @@ function MainPage() {
   const [syncedCrosshairPrice, setSyncedCrosshairPrice] = useState<number | null>(null)
   // どのチャートがアクティブ（マウスオーバー中）か
   const [activeChart, setActiveChart] = useState<string | null>(null)
+  // データ不足警告の表示状態
+  const [missingDataWarning, setMissingDataWarning] = useState<string | null>(null)
+  // Lot設定（OrderPanelとControlBarで共有）
+  const [sharedLotQuantity, setSharedLotQuantity] = useState('1')
+  const [sharedLotUnit, setSharedLotUnit] = useState('10000')
   // シミュレーションタイマー用のref
   const timerRef = useRef<number | null>(null)
   // 現在時刻を保持するref（タイマーコールバック内で使用）
@@ -138,8 +143,16 @@ function MainPage() {
         const localIsoString = `${year}-${month}-${day} ${hour}:${minute}:${second}`
 
         // バックエンドに時刻更新を通知
-        await simulationApi.advanceTime(localIsoString)
-        advanceTime(newTime)
+        const response = await simulationApi.advanceTime(localIsoString)
+
+        // バックエンドからの実際の時刻を使用（週末スキップに対応）
+        if (response.success && response.data?.current_time) {
+          const actualTime = new Date(response.data.current_time)
+          advanceTime(actualTime)
+        } else {
+          // エラー時はフロントエンドで計算した時刻を使用
+          advanceTime(newTime)
+        }
         // チャートはcurrentTimeの変更により自動的にデータを再取得する
       } catch (error) {
         console.error('Failed to advance time:', error)
@@ -266,6 +279,17 @@ function MainPage() {
     setSyncedCrosshairPrice(price)
   }
 
+  // データ不足通知ハンドラー
+  const handleDataMissing = useCallback((timeframe: string) => {
+    const timeframeName = {
+      'W1': '週足',
+      'D1': '日足',
+      'H1': '1時間足',
+      'M10': '10分足'
+    }[timeframe] || timeframe
+    setMissingDataWarning(`${timeframeName}のデータがインポートされていません。「データ管理」から${timeframeName}データをインポートしてください。`)
+  }, [])
+
   const formatTime = (date: Date | null) => {
     if (!date) return '----/--/-- --:--'
     return date.toLocaleString('ja-JP', {
@@ -303,12 +327,12 @@ function MainPage() {
         }</span>
         {status === 'idle' && (
           <span className="text-yellow-400">
-            ※ 「設定」ボタンからシミュレーションを開始してください
+            ※ 「設定」または「開始」ボタンからシミュレーションを設定してください
           </span>
         )}
         {status === 'stopped' && (
           <span className="text-yellow-400">
-            ※ 新しいシミュレーションを開始するには「設定」または「開始」ボタンをクリックしてください
+            ※ 「設定」または「開始」ボタンから新しいシミュレーションを設定してください
           </span>
         )}
         {status === 'created' && (
@@ -334,6 +358,7 @@ function MainPage() {
           activeChart={activeChart}
           onActiveChange={setActiveChart}
           refreshTrigger={refreshTrigger}
+          onDataMissing={handleDataMissing}
         />
         <ChartPanel
           key={`D1-${chartKey}`}
@@ -346,6 +371,7 @@ function MainPage() {
           activeChart={activeChart}
           onActiveChange={setActiveChart}
           refreshTrigger={refreshTrigger}
+          onDataMissing={handleDataMissing}
         />
         <ChartPanel
           key={`H1-${chartKey}`}
@@ -358,6 +384,7 @@ function MainPage() {
           activeChart={activeChart}
           onActiveChange={setActiveChart}
           refreshTrigger={refreshTrigger}
+          onDataMissing={handleDataMissing}
         />
         <ChartPanel
           key={`M10-${chartKey}`}
@@ -370,16 +397,32 @@ function MainPage() {
           activeChart={activeChart}
           onActiveChange={setActiveChart}
           refreshTrigger={refreshTrigger}
+          onDataMissing={handleDataMissing}
         />
       </div>
 
       {/* Resizable bottom section (Control Bar + Order Panel + Position & Account) */}
       <div className="resize-y border-t-2 border-border flex flex-col" style={{ height: '400px', minHeight: '250px', maxHeight: '650px' }}>
         {/* Control Bar */}
-        <ControlBar currentPrice={currentPrice} onRefresh={handleRefresh} />
+        <ControlBar
+          currentPrice={currentPrice}
+          onRefresh={handleRefresh}
+          lotQuantity={sharedLotQuantity}
+          lotUnit={sharedLotUnit}
+          onLotQuantityChange={setSharedLotQuantity}
+          onLotUnitChange={setSharedLotUnit}
+        />
 
         {/* Order Panel */}
-        <OrderPanel currentPrice={currentPrice} onRefresh={handleRefresh} />
+        <OrderPanel
+          currentPrice={currentPrice}
+          account={account}
+          onRefresh={handleRefresh}
+          lotQuantity={sharedLotQuantity}
+          lotUnit={sharedLotUnit}
+          onLotQuantityChange={setSharedLotQuantity}
+          onLotUnitChange={setSharedLotUnit}
+        />
 
         {/* Position, Pending Orders & Account */}
         <div className="flex-1 grid grid-cols-10 gap-2 p-2 overflow-hidden">
@@ -419,6 +462,36 @@ function MainPage() {
           'データを読み込み中...'
         }
       />
+
+      {/* データ不足警告ポップアップ */}
+      {missingDataWarning && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-bg-card rounded-lg p-6 w-[500px]">
+            <div className="flex items-center gap-3 mb-4">
+              <span className="text-2xl text-yellow-400">⚠</span>
+              <h2 className="text-lg font-bold text-text-strong">データ不足の警告</h2>
+            </div>
+            <p className="text-text-primary mb-6">{missingDataWarning}</p>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => {
+                  setMissingDataWarning(null)
+                  navigate('/data')
+                }}
+                className="px-4 py-2 bg-btn-primary text-text-strong rounded hover:opacity-80"
+              >
+                データ管理へ移動
+              </button>
+              <button
+                onClick={() => setMissingDataWarning(null)}
+                className="px-4 py-2 bg-btn-secondary text-text-strong rounded hover:opacity-80"
+              >
+                閉じる
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
