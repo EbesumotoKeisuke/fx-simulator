@@ -21,4 +21,5 @@ EXPOSE 5678
 
 # Run the application with debugpy
 # debugpy でリモートデバッグを有効化（デバッガーが接続されなくても通常通り起動）
-CMD ["python", "-m", "debugpy", "--listen", "0.0.0.0:5678", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# --timeout-keep-alive 300: 長時間実行されるリクエスト（データインポートなど）に対応
+CMD ["python", "-m", "debugpy", "--listen", "0.0.0.0:5678", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--timeout-keep-alive", "300"]
