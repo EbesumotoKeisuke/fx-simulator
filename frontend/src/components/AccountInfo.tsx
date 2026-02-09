@@ -106,33 +106,22 @@ function AccountInfo({ refreshTrigger }: AccountInfoProps) {
           </div>
         </div>
 
-        {/* トータル損益 */}
+        {/* トータル損益と連敗状況 */}
         <div className="flex items-center gap-2 border-t border-border pt-2">
           <span className="text-text-primary">トータル損益:</span>
           <span className={`font-semibold ${profitLoss >= 0 ? 'text-buy' : 'text-sell'}`}>
             {profitLoss >= 0 ? '+' : ''}¥{profitLoss.toLocaleString()}
             <span className="text-text-secondary ml-2">({profitLossPercent}%)</span>
           </span>
-        </div>
-
-        {/* 連敗状況 */}
-        {account.consecutive_losses !== undefined && (
-          <div
-            className={`mt-2 px-3 py-2 rounded ${
-              account.consecutive_losses === 0
-                ? 'bg-buy/20'
-                : account.consecutive_losses <= 2
-                ? 'bg-yellow-900/20'
-                : 'bg-sell/20'
-            }`}
-          >
+          {/* 連敗状況 */}
+          {account.consecutive_losses !== undefined && (
             <span
-              className={`text-base font-semibold ${
+              className={`ml-4 px-2 py-0.5 rounded text-base font-semibold ${
                 account.consecutive_losses === 0
-                  ? 'text-buy'
+                  ? 'bg-buy/20 text-buy'
                   : account.consecutive_losses <= 2
-                  ? 'text-yellow-500'
-                  : 'text-sell'
+                  ? 'bg-yellow-900/20 text-yellow-500'
+                  : 'bg-sell/20 text-sell'
               }`}
             >
               連敗: {account.consecutive_losses}回{' '}
@@ -142,8 +131,8 @@ function AccountInfo({ refreshTrigger }: AccountInfoProps) {
                 ? '⚠️'
                 : '🚨'}
             </span>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* パフォーマンス指標 */}
