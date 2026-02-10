@@ -5,23 +5,32 @@ from sqlalchemy.orm import Session
 
 from src.utils.database import get_db
 from src.services.analytics_service import AnalyticsService
+from src.utils.logger import get_logger
 
 router = APIRouter()
+logger = get_logger(__name__)
 
 
 @router.get("/performance")
 async def get_performance(db: Session = Depends(get_db)):
     """パフォーマンス指標を取得する"""
-    service = AnalyticsService(db)
-    result = service.get_performance_metrics()
+    try:
+        service = AnalyticsService(db)
+        result = service.get_performance_metrics()
 
-    if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
+        if "error" in result:
+            logger.warning(f"パフォーマンス取得でエラー: {result['error']}")
+            raise HTTPException(status_code=404, detail=result["error"])
 
-    return {
-        "success": True,
-        "data": result,
-    }
+        return {
+            "success": True,
+            "data": result,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"get_performance error : {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/equity-curve")
@@ -30,31 +39,45 @@ async def get_equity_curve(
     db: Session = Depends(get_db),
 ):
     """資産曲線データを取得する"""
-    service = AnalyticsService(db)
-    result = service.get_equity_curve(interval)
+    try:
+        service = AnalyticsService(db)
+        result = service.get_equity_curve(interval)
 
-    if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
+        if "error" in result:
+            logger.warning(f"資産曲線取得でエラー: {result['error']}")
+            raise HTTPException(status_code=404, detail=result["error"])
 
-    return {
-        "success": True,
-        "data": result,
-    }
+        return {
+            "success": True,
+            "data": result,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"get_equity_curve error : {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/drawdown")
 async def get_drawdown(db: Session = Depends(get_db)):
     """ドローダウンデータを取得する"""
-    service = AnalyticsService(db)
-    result = service.get_drawdown_data()
+    try:
+        service = AnalyticsService(db)
+        result = service.get_drawdown_data()
 
-    if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
+        if "error" in result:
+            logger.warning(f"ドローダウン取得でエラー: {result['error']}")
+            raise HTTPException(status_code=404, detail=result["error"])
 
-    return {
-        "success": True,
-        "data": result,
-    }
+        return {
+            "success": True,
+            "data": result,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"get_drawdown error : {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 class AIFeedbackRequest(BaseModel):
@@ -113,63 +136,70 @@ async def get_trades_with_candles(
             "end_time": 売買履歴の終了時刻
         }
     """
-    from src.services.trading_service import TradingService
-    from src.services.market_data_service import MarketDataService
-    from datetime import datetime
+    try:
+        from src.services.trading_service import TradingService
+        from src.services.market_data_service import MarketDataService
+        from datetime import datetime
 
-    trading_service = TradingService(db)
-    market_service = MarketDataService(db)
+        trading_service = TradingService(db)
+        market_service = MarketDataService(db)
 
-    # 売買履歴を取得
-    trades_result = trading_service.get_trades(limit=10000, offset=0)
-    trades = trades_result.get("trades", [])
+        # 売買履歴を取得
+        trades_result = trading_service.get_trades(limit=10000, offset=0)
+        trades = trades_result.get("trades", [])
 
-    if not trades:
-        return {
-            "success": True,
-            "data": {
-                "trades": [],
-                "candles": [],
-                "timeframe": timeframe,
-                "start_time": None,
-                "end_time": None
+        if not trades:
+            return {
+                "success": True,
+                "data": {
+                    "trades": [],
+                    "candles": [],
+                    "timeframe": timeframe,
+                    "start_time": None,
+                    "end_time": None
+                }
             }
-        }
 
-    # 売買履歴の時間範囲を取得
-    opened_times = [datetime.fromisoformat(t["opened_at"]) for t in trades if t.get("opened_at")]
-    closed_times = [datetime.fromisoformat(t["closed_at"]) for t in trades if t.get("closed_at")]
+        # 売買履歴の時間範囲を取得
+        opened_times = [datetime.fromisoformat(t["opened_at"]) for t in trades if t.get("opened_at")]
+        closed_times = [datetime.fromisoformat(t["closed_at"]) for t in trades if t.get("closed_at")]
 
-    if not opened_times or not closed_times:
+        if not opened_times or not closed_times:
+            return {
+                "success": True,
+                "data": {
+                    "trades": trades,
+                    "candles": [],
+                    "timeframe": timeframe,
+                    "start_time": None,
+                    "end_time": None
+                }
+            }
+
+        start_time = min(opened_times)
+        end_time = max(closed_times)
+
+        # ローソク足データを取得（時間範囲を指定）
+        candles = market_service.get_candles(
+            timeframe=timeframe,
+            start_time=start_time,
+            end_time=end_time,
+            limit=10000
+        )
+
         return {
             "success": True,
             "data": {
                 "trades": trades,
-                "candles": [],
+                "candles": candles,
                 "timeframe": timeframe,
-                "start_time": None,
-                "end_time": None
+                "start_time": start_time.isoformat(),
+                "end_time": end_time.isoformat()
             }
         }
-
-    start_time = min(opened_times)
-    end_time = max(closed_times)
-
-    # ローソク足データを取得（時間範囲を指定）
-    candles = market_service.get_candles(
-        timeframe=timeframe,
-        start_time=start_time,
-        end_time=end_time,
-        limit=10000
-    )
-
-    return {
-        "success": True,
-        "data": {
-            "trades": trades,
-            "candles": candles,
-            "timeframe": timeframe,
-            "start_time": start_time.isoformat(),
-            "end_time": end_time.isoformat()
+    except Exception as e:
+        logger.error(f"get_trades_with_candles error : {e}")
+        return {
+            "success": False,
+            "error": {"message": str(e)},
         }
-    }

@@ -13,6 +13,7 @@ import AlertBanner from '../components/AlertBanner'
 import LoadingOverlay from '../components/LoadingOverlay'
 import { useSimulationStore } from '../store/simulationStore'
 import { marketDataApi, simulationApi, accountApi, AccountInfo as AccountInfoType } from '../services/api'
+import { logger } from '../utils/logger'
 
 /**
  * シミュレーション速度の基準値
@@ -119,7 +120,7 @@ function MainPage() {
 
       // 前回の処理がまだ完了していない場合はスキップ（競合防止）
       if (isAdvancingRef.current) {
-        console.warn('[Timer] Skipping advance_time: previous request still in progress')
+        logger.warning('MainPage', 'Skipping advance_time: previous request still in progress')
         return
       }
 
@@ -155,7 +156,7 @@ function MainPage() {
         }
         // チャートはcurrentTimeの変更により自動的にデータを再取得する
       } catch (error) {
-        console.error('Failed to advance time:', error)
+        logger.error('MainPage', '時刻の更新に失敗しました', { error })
       } finally {
         // 処理完了フラグをクリア
         isAdvancingRef.current = false
@@ -197,7 +198,7 @@ function MainPage() {
         setCurrentPrice(res.data.candles[0].close)
       }
     } catch (error) {
-      console.error('Failed to fetch current price:', error)
+      logger.error('MainPage', '現在価格の取得に失敗しました', { error })
     }
   }, [currentTime, status])
 
@@ -215,7 +216,7 @@ function MainPage() {
         setAccount(res.data)
       }
     } catch (error) {
-      console.error('Failed to fetch account:', error)
+      logger.error('MainPage', '口座情報の取得に失敗しました', { error })
     }
   }, [status])
 

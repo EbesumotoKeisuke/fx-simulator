@@ -21,6 +21,9 @@ from src.models.simulation import Simulation
 from src.models.account import Account
 from src.models.trade import Trade
 from src.models.position import Position
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class AlertService:
@@ -80,32 +83,36 @@ class AlertService:
                 - category: アラートカテゴリ
                 - timestamp: 生成時刻
         """
-        simulation = self._get_active_simulation()
-        if not simulation:
+        try:
+            simulation = self._get_active_simulation()
+            if not simulation:
+                return []
+
+            alerts = []
+
+            # 連敗チェック
+            alerts.extend(self._check_consecutive_losses(simulation.id))
+
+            # 本日の損失チェック
+            alerts.extend(self._check_daily_loss(simulation))
+
+            # ドローダウンチェック
+            alerts.extend(self._check_drawdown(simulation.id))
+
+            # トレード間隔チェック
+            alerts.extend(self._check_trading_interval(simulation.id))
+
+            # ロットサイズチェック（注文時のみ）
+            if lot_size is not None:
+                alerts.extend(self._check_lot_size(simulation.id, lot_size))
+
+            # 時間帯チェック
+            alerts.extend(self._check_time_performance(simulation))
+
+            return alerts
+        except Exception as e:
+            logger.error(f"check_alerts error : {e}")
             return []
-
-        alerts = []
-
-        # 連敗チェック
-        alerts.extend(self._check_consecutive_losses(simulation.id))
-
-        # 本日の損失チェック
-        alerts.extend(self._check_daily_loss(simulation))
-
-        # ドローダウンチェック
-        alerts.extend(self._check_drawdown(simulation.id))
-
-        # トレード間隔チェック
-        alerts.extend(self._check_trading_interval(simulation.id))
-
-        # ロットサイズチェック（注文時のみ）
-        if lot_size is not None:
-            alerts.extend(self._check_lot_size(simulation.id, lot_size))
-
-        # 時間帯チェック
-        alerts.extend(self._check_time_performance(simulation))
-
-        return alerts
 
     def _check_consecutive_losses(self, simulation_id: str) -> List[Dict[str, Any]]:
         """連敗をチェックする"""
@@ -414,115 +421,119 @@ class AlertService:
         Returns:
             Dict: 分析サマリー
         """
-        simulation = self._get_active_simulation()
-        if not simulation:
-            # 最新の停止済みシミュレーションを取得
-            simulation = (
-                self.db.query(Simulation)
-                .order_by(desc(Simulation.created_at))
-                .first()
+        try:
+            simulation = self._get_active_simulation()
+            if not simulation:
+                # 最新の停止済みシミュレーションを取得
+                simulation = (
+                    self.db.query(Simulation)
+                    .order_by(desc(Simulation.created_at))
+                    .first()
+                )
+
+            if not simulation:
+                return {"error": "シミュレーションが見つかりません"}
+
+            # 全トレードを取得
+            trades = (
+                self.db.query(Trade)
+                .filter(Trade.simulation_id == simulation.id)
+                .order_by(Trade.closed_at)
+                .all()
             )
 
-        if not simulation:
-            return {"error": "シミュレーションが見つかりません"}
+            if not trades:
+                return {"error": "トレードデータがありません"}
 
-        # 全トレードを取得
-        trades = (
-            self.db.query(Trade)
-            .filter(Trade.simulation_id == simulation.id)
-            .order_by(Trade.closed_at)
-            .all()
-        )
+            # 時間帯別分析
+            hour_stats = {}
+            for trade in trades:
+                if trade.opened_at:
+                    hour = trade.opened_at.hour
+                    if hour not in hour_stats:
+                        hour_stats[hour] = {"wins": 0, "losses": 0, "pnl": 0}
 
-        if not trades:
-            return {"error": "トレードデータがありません"}
+                    if float(trade.realized_pnl) > 0:
+                        hour_stats[hour]["wins"] += 1
+                    else:
+                        hour_stats[hour]["losses"] += 1
+                    hour_stats[hour]["pnl"] += float(trade.realized_pnl)
 
-        # 時間帯別分析
-        hour_stats = {}
-        for trade in trades:
-            if trade.opened_at:
-                hour = trade.opened_at.hour
-                if hour not in hour_stats:
-                    hour_stats[hour] = {"wins": 0, "losses": 0, "pnl": 0}
+            # 時間帯別勝率を計算
+            hour_winrates = {}
+            for hour, stats in hour_stats.items():
+                total = stats["wins"] + stats["losses"]
+                if total > 0:
+                    hour_winrates[hour] = {
+                        "winrate": round(stats["wins"] / total * 100, 1),
+                        "total_trades": total,
+                        "pnl": round(stats["pnl"], 2),
+                    }
 
-                if float(trade.realized_pnl) > 0:
-                    hour_stats[hour]["wins"] += 1
+            # ベスト/ワースト時間帯
+            best_hour = max(hour_winrates.items(), key=lambda x: x[1]["winrate"]) if hour_winrates else None
+            worst_hour = min(hour_winrates.items(), key=lambda x: x[1]["winrate"]) if hour_winrates else None
+
+            # 連敗パターン分析
+            max_consecutive_losses = 0
+            current_losses = 0
+            loss_after_loss_count = 0
+            prev_was_loss = False
+
+            for trade in trades:
+                is_loss = float(trade.realized_pnl) < 0
+                if is_loss:
+                    current_losses += 1
+                    max_consecutive_losses = max(max_consecutive_losses, current_losses)
+                    if prev_was_loss:
+                        loss_after_loss_count += 1
                 else:
-                    hour_stats[hour]["losses"] += 1
-                hour_stats[hour]["pnl"] += float(trade.realized_pnl)
+                    current_losses = 0
+                prev_was_loss = is_loss
 
-        # 時間帯別勝率を計算
-        hour_winrates = {}
-        for hour, stats in hour_stats.items():
-            total = stats["wins"] + stats["losses"]
-            if total > 0:
-                hour_winrates[hour] = {
-                    "winrate": round(stats["wins"] / total * 100, 1),
-                    "total_trades": total,
-                    "pnl": round(stats["pnl"], 2),
-                }
+            # 改善提案を生成
+            suggestions = []
 
-        # ベスト/ワースト時間帯
-        best_hour = max(hour_winrates.items(), key=lambda x: x[1]["winrate"]) if hour_winrates else None
-        worst_hour = min(hour_winrates.items(), key=lambda x: x[1]["winrate"]) if hour_winrates else None
+            if worst_hour:
+                hour, stats = worst_hour
+                if stats["winrate"] < 40:
+                    suggestions.append({
+                        "category": "時間帯",
+                        "issue": f"{hour}時台の勝率が{stats['winrate']}%と低い",
+                        "suggestion": f"{hour}時台のトレードを避けるか、より慎重に判断することを検討してください",
+                    })
 
-        # 連敗パターン分析
-        max_consecutive_losses = 0
-        current_losses = 0
-        loss_after_loss_count = 0
-        prev_was_loss = False
-
-        for trade in trades:
-            is_loss = float(trade.realized_pnl) < 0
-            if is_loss:
-                current_losses += 1
-                max_consecutive_losses = max(max_consecutive_losses, current_losses)
-                if prev_was_loss:
-                    loss_after_loss_count += 1
-            else:
-                current_losses = 0
-            prev_was_loss = is_loss
-
-        # 改善提案を生成
-        suggestions = []
-
-        if worst_hour:
-            hour, stats = worst_hour
-            if stats["winrate"] < 40:
+            if max_consecutive_losses >= 3:
                 suggestions.append({
-                    "category": "時間帯",
-                    "issue": f"{hour}時台の勝率が{stats['winrate']}%と低い",
-                    "suggestion": f"{hour}時台のトレードを避けるか、より慎重に判断することを検討してください",
+                    "category": "連敗",
+                    "issue": f"最大{max_consecutive_losses}連敗のパターンがある",
+                    "suggestion": "3連敗後は一時的にトレードを控え、冷静になる時間を取りましょう",
                 })
 
-        if max_consecutive_losses >= 3:
-            suggestions.append({
-                "category": "連敗",
-                "issue": f"最大{max_consecutive_losses}連敗のパターンがある",
-                "suggestion": "3連敗後は一時的にトレードを控え、冷静になる時間を取りましょう",
-            })
+            # 損益バランス分析
+            winning_trades = [t for t in trades if float(t.realized_pnl) > 0]
+            losing_trades = [t for t in trades if float(t.realized_pnl) < 0]
 
-        # 損益バランス分析
-        winning_trades = [t for t in trades if float(t.realized_pnl) > 0]
-        losing_trades = [t for t in trades if float(t.realized_pnl) < 0]
+            if winning_trades and losing_trades:
+                avg_win = sum(float(t.realized_pnl) for t in winning_trades) / len(winning_trades)
+                avg_loss = abs(sum(float(t.realized_pnl) for t in losing_trades) / len(losing_trades))
 
-        if winning_trades and losing_trades:
-            avg_win = sum(float(t.realized_pnl) for t in winning_trades) / len(winning_trades)
-            avg_loss = abs(sum(float(t.realized_pnl) for t in losing_trades) / len(losing_trades))
+                if avg_win < avg_loss:
+                    suggestions.append({
+                        "category": "リスクリワード",
+                        "issue": f"平均利益({avg_win:.0f}円)が平均損失({avg_loss:.0f}円)より小さい",
+                        "suggestion": "利確幅を広げるか、損切り幅を狭くしてリスクリワード比を改善しましょう",
+                    })
 
-            if avg_win < avg_loss:
-                suggestions.append({
-                    "category": "リスクリワード",
-                    "issue": f"平均利益({avg_win:.0f}円)が平均損失({avg_loss:.0f}円)より小さい",
-                    "suggestion": "利確幅を広げるか、損切り幅を狭くしてリスクリワード比を改善しましょう",
-                })
-
-        return {
-            "simulation_id": str(simulation.id),
-            "total_trades": len(trades),
-            "hour_analysis": hour_winrates,
-            "best_hour": {"hour": best_hour[0], **best_hour[1]} if best_hour else None,
-            "worst_hour": {"hour": worst_hour[0], **worst_hour[1]} if worst_hour else None,
-            "max_consecutive_losses": max_consecutive_losses,
-            "suggestions": suggestions,
-        }
+            return {
+                "simulation_id": str(simulation.id),
+                "total_trades": len(trades),
+                "hour_analysis": hour_winrates,
+                "best_hour": {"hour": best_hour[0], **best_hour[1]} if best_hour else None,
+                "worst_hour": {"hour": worst_hour[0], **worst_hour[1]} if worst_hour else None,
+                "max_consecutive_losses": max_consecutive_losses,
+                "suggestions": suggestions,
+            }
+        except Exception as e:
+            logger.error(f"get_trade_analysis_summary error : {e}")
+            return {"error": str(e)}

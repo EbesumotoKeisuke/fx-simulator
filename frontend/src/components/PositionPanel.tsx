@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { positionsApi, Position, SetSLTPRequest, AccountInfo } from '../services/api'
 import { useSimulationStore } from '../store/simulationStore'
+import { logger } from '../utils/logger'
 import LoadingSpinner from './LoadingSpinner'
 
 interface PositionPanelProps {
@@ -28,7 +29,7 @@ function PositionPanel({ refreshTrigger, account, currentPrice }: PositionPanelP
   const { status } = useSimulationStore()
 
   // デバッグ用：ステータスを確認
-  console.log('[PositionPanel] status:', status)
+  logger.debug('PositionPanel', `status: ${status}`)
 
   // 証拠金を計算する関数
   const calculateMargin = (price: number, lotSize: number): number => {
@@ -52,7 +53,7 @@ function PositionPanel({ refreshTrigger, account, currentPrice }: PositionPanelP
         setTotalPnl(res.data.total_unrealized_pnl)
       }
     } catch (error) {
-      console.error('Failed to fetch positions:', error)
+      logger.error('PositionPanel', `fetchPositions error : ${error}`, { error })
     }
   }, [status])
 
@@ -81,6 +82,7 @@ function PositionPanel({ refreshTrigger, account, currentPrice }: PositionPanelP
         alert(`決済エラー: ${res.error?.message}`)
       }
     } catch (error) {
+      logger.error('PositionPanel', `handleClose error : ${error}`, { error })
       alert(`決済エラー: ${error}`)
     } finally {
       setClosingId(null)
@@ -93,11 +95,14 @@ function PositionPanel({ refreshTrigger, account, currentPrice }: PositionPanelP
 
     setLoading(true)
     try {
+      logger.info('PositionPanel', `全ポジション決済開始: ${positions.length}件`)
       for (const pos of positions) {
         await positionsApi.close(pos.position_id)
       }
+      logger.info('PositionPanel', '全ポジション決済完了')
       await fetchPositions()
     } catch (error) {
+      logger.error('PositionPanel', `handleCloseAll error : ${error}`, { error })
       alert(`決済エラー: ${error}`)
     } finally {
       setLoading(false)
@@ -187,12 +192,15 @@ function PositionPanel({ refreshTrigger, account, currentPrice }: PositionPanelP
       const res = await positionsApi.setSltp(editingPosition.position_id, request)
 
       if (res.success) {
+        logger.info('PositionPanel', `SL/TP設定成功: position_id=${editingPosition.position_id}`)
         await fetchPositions()
         setEditingPosition(null)
       } else {
+        logger.warning('PositionPanel', `SL/TP設定エラー: ${res.error?.message}`)
         alert(`SL/TP設定エラー: ${res.error?.message}`)
       }
     } catch (error) {
+      logger.error('PositionPanel', `handleSaveSltp error : ${error}`, { error })
       alert(`SL/TP設定エラー: ${error}`)
     } finally {
       setIsSaving(false)

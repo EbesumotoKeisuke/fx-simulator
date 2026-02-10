@@ -11,8 +11,10 @@ from sqlalchemy.orm import Session
 
 from src.utils.database import get_db
 from src.services.alert_service import AlertService
+from src.utils.logger import get_logger
 
 router = APIRouter()
+logger = get_logger(__name__)
 
 
 class CheckAlertsRequest(BaseModel):
@@ -52,15 +54,22 @@ async def get_alerts(
             }
         }
     """
-    service = AlertService(db)
-    alerts = service.check_alerts(lot_size=lot_size)
+    try:
+        service = AlertService(db)
+        alerts = service.check_alerts(lot_size=lot_size)
 
-    return {
-        "success": True,
-        "data": {
-            "alerts": alerts,
-        },
-    }
+        return {
+            "success": True,
+            "data": {
+                "alerts": alerts,
+            },
+        }
+    except Exception as e:
+        logger.error(f"get_alerts error : {e}")
+        return {
+            "success": False,
+            "error": {"message": str(e)},
+        }
 
 
 @router.post("/check")
@@ -87,20 +96,27 @@ async def check_alerts(
             }
         }
     """
-    service = AlertService(db)
-    alerts = service.check_alerts(lot_size=request.lot_size)
+    try:
+        service = AlertService(db)
+        alerts = service.check_alerts(lot_size=request.lot_size)
 
-    has_danger = any(a["type"] == "danger" for a in alerts)
-    has_warning = any(a["type"] == "warning" for a in alerts)
+        has_danger = any(a["type"] == "danger" for a in alerts)
+        has_warning = any(a["type"] == "warning" for a in alerts)
 
-    return {
-        "success": True,
-        "data": {
-            "alerts": alerts,
-            "has_danger": has_danger,
-            "has_warning": has_warning,
-        },
-    }
+        return {
+            "success": True,
+            "data": {
+                "alerts": alerts,
+                "has_danger": has_danger,
+                "has_warning": has_warning,
+            },
+        }
+    except Exception as e:
+        logger.error(f"check_alerts error : {e}")
+        return {
+            "success": False,
+            "error": {"message": str(e)},
+        }
 
 
 @router.get("/analysis-summary")
@@ -119,16 +135,24 @@ async def get_analysis_summary(
             "data": 分析サマリー
         }
     """
-    service = AlertService(db)
-    result = service.get_trade_analysis_summary()
+    try:
+        service = AlertService(db)
+        result = service.get_trade_analysis_summary()
 
-    if "error" in result:
+        if "error" in result:
+            logger.warning(f"分析サマリー取得でエラー: {result['error']}")
+            return {
+                "success": False,
+                "error": {"message": result["error"]},
+            }
+
+        return {
+            "success": True,
+            "data": result,
+        }
+    except Exception as e:
+        logger.error(f"get_analysis_summary error : {e}")
         return {
             "success": False,
-            "error": {"message": result["error"]},
+            "error": {"message": str(e)},
         }
-
-    return {
-        "success": True,
-        "data": result,
-    }

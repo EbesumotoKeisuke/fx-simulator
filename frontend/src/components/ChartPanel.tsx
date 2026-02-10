@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { createChart, IChartApi, ISeriesApi, CandlestickData, Time, MouseEventParams } from 'lightweight-charts'
 import { marketDataApi, Candle, ordersApi, tradesApi } from '../services/api'
+import { logger } from '../utils/logger'
 
 /**
  * ローソク足の境界を越えたかをチェックする関数
@@ -232,13 +233,13 @@ function ChartPanel({
   const fetchData = useCallback(async () => {
     // seriesRefが設定されるまで待つ
     if (!seriesRef.current) {
-      console.warn('[ChartPanel] Series not ready, skipping data fetch')
+      logger.warning('ChartPanel', 'Series not ready, skipping data fetch')
       return
     }
 
     // 前回のリクエストがまだ完了していない場合はスキップ（競合防止）
     if (isFetchingRef.current) {
-      console.warn(`[${timeframe}] Skipping data fetch: previous request still in progress`)
+      logger.warning('ChartPanel', `[${timeframe}] Skipping data fetch: previous request still in progress`)
       return
     }
 
@@ -291,7 +292,7 @@ function ChartPanel({
         const prevLastTime = lastCandleTimeRef.current
 
         // デバッグ: 取得したデータの最後のローソク足を確認
-        console.log(`[${timeframe}] Data fetched:`, {
+        logger.debug('ChartPanel', `[${timeframe}] Data fetched`, {
           count: formattedData.length,
           lastTime: newLastTime,
           prevLastTime: prevLastTime,
@@ -346,7 +347,7 @@ function ChartPanel({
         }
       }
     } catch (error) {
-      console.error('[ChartPanel] Failed to fetch candle data:', error)
+      logger.error('ChartPanel', `fetchData error : ${error}`, { timeframe, error })
     } finally {
       // 取得完了フラグをクリア
       isFetchingRef.current = false
@@ -370,7 +371,7 @@ function ChartPanel({
 
     // ローソク足データがない場合はスキップ（後で再試行される）
     if (candleDataRef.current.size === 0) {
-      console.log('[ChartPanel] updateMarkers: No candle data available yet, skipping')
+      logger.debug('ChartPanel', 'updateMarkers: No candle data available yet, skipping')
       return
     }
 
@@ -402,18 +403,19 @@ function ChartPanel({
             finalTime = findNearestCandleTime(markerTime, candleDataRef.current)
             if (finalTime !== null) {
               fallbackMatchCount++
-              console.log(
-                `[Marker Fallback] Order ${order.order_id}: ` +
-                `${order.executed_at} → rounded to ${roundedDate.toISOString()} → ` +
-                `target ${markerTime} → found nearest ${finalTime} ` +
-                `(diff: ${Math.abs(finalTime - markerTime)}s)`
-              )
+              logger.debug('ChartPanel', `[Marker Fallback] Order ${order.order_id}`, {
+                executed_at: order.executed_at,
+                roundedDate: roundedDate.toISOString(),
+                targetTime: markerTime,
+                foundTime: finalTime,
+                diff: Math.abs(finalTime - markerTime)
+              })
             } else {
               failedMatchCount++
-              console.warn(
-                `[Marker Failed] Order ${order.order_id}: ` +
-                `${order.executed_at} → no matching candle found for ${markerTime}`
-              )
+              logger.warning('ChartPanel', `[Marker Failed] Order ${order.order_id}: no matching candle found`, {
+                executed_at: order.executed_at,
+                targetTime: markerTime
+              })
             }
           }
 
@@ -447,18 +449,19 @@ function ChartPanel({
             finalTime = findNearestCandleTime(markerTime, candleDataRef.current)
             if (finalTime !== null) {
               fallbackMatchCount++
-              console.log(
-                `[Marker Fallback] Trade ${trade.trade_id}: ` +
-                `${trade.closed_at} → rounded to ${roundedDate.toISOString()} → ` +
-                `target ${markerTime} → found nearest ${finalTime} ` +
-                `(diff: ${Math.abs(finalTime - markerTime)}s)`
-              )
+              logger.debug('ChartPanel', `[Marker Fallback] Trade ${trade.trade_id}`, {
+                closed_at: trade.closed_at,
+                roundedDate: roundedDate.toISOString(),
+                targetTime: markerTime,
+                foundTime: finalTime,
+                diff: Math.abs(finalTime - markerTime)
+              })
             } else {
               failedMatchCount++
-              console.warn(
-                `[Marker Failed] Trade ${trade.trade_id}: ` +
-                `${trade.closed_at} → no matching candle found for ${markerTime}`
-              )
+              logger.warning('ChartPanel', `[Marker Failed] Trade ${trade.trade_id}: no matching candle found`, {
+                closed_at: trade.closed_at,
+                targetTime: markerTime
+              })
             }
           }
 
@@ -481,7 +484,7 @@ function ChartPanel({
       markers.sort((a, b) => (a.time as number) - (b.time as number))
 
       // デバッグログ出力
-      console.log('[ChartPanel] Marker Summary:', {
+      logger.debug('ChartPanel', 'Marker Summary', {
         total: markers.length,
         exactMatches: exactMatchCount,
         fallbackMatches: fallbackMatchCount,
@@ -491,7 +494,7 @@ function ChartPanel({
 
       seriesRef.current.setMarkers(markers)
     } catch (error) {
-      console.error('[ChartPanel] Failed to update markers:', error)
+      logger.error('ChartPanel', `updateMarkers error : ${error}`, { error })
     }
   }, [timeframe])
 
@@ -797,7 +800,7 @@ function ChartPanel({
           }
         }
       } catch (error) {
-        console.error('Failed to calculate crosshair position:', error)
+        logger.error('ChartPanel', `syncedCrosshair error : ${error}`, { error })
         setCrosshairPosition(null)
       }
     } else {

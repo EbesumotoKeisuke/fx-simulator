@@ -66,7 +66,7 @@ async function fetchApi<T>(
   // HTTPステータスコードが200番台以外の場合はエラーレスポンスを返す
   if (!response.ok) {
     const errorMessage = data.detail || 'An error occurred'
-    logger.error('API', `APIエラー: ${endpoint}`, { status: response.status, message: errorMessage })
+    logger.error('API', `fetchApi error : ${endpoint} - ${errorMessage}`, { status: response.status, message: errorMessage })
     return {
       success: false,
       error: {

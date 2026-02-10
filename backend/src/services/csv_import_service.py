@@ -22,6 +22,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
 
 from src.models.candle import Candle
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 # CSVファイルと時間足のマッピング
@@ -171,7 +174,7 @@ class CSVImportService:
                 self.db.commit()
 
                 # 進行状況をログ出力
-                print(f"Imported {min(i + BATCH_SIZE, total_records)}/{total_records} records for {timeframe}")
+                logger.info(f"Imported {min(i + BATCH_SIZE, total_records)}/{total_records} records for {timeframe}")
 
         return {
             "timeframe": timeframe,
@@ -196,9 +199,12 @@ class CSVImportService:
         results = []
         for timeframe in CSV_FILES.keys():
             try:
+                logger.info(f"インポート開始: {timeframe}")
                 result = self.import_csv(timeframe)
                 results.append(result)
+                logger.info(f"インポート完了: {timeframe}, {result.get('imported_count', 0)}件")
             except Exception as e:
+                logger.error(f"import_all error : {timeframe} - {e}")
                 results.append({
                     "timeframe": timeframe,
                     "error": str(e),

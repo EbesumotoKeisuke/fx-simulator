@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { marketDataApi, CsvFile, DateRangeResponse } from '../services/api'
 import LoadingOverlay from '../components/LoadingOverlay'
+import { logger } from '../utils/logger'
 
 type TimeframeLabel = {
   [key: string]: string
@@ -45,7 +46,7 @@ function DataManagementPage() {
         setDateRange(rangeRes.data)
       }
     } catch (error) {
-      console.error('Failed to fetch data:', error)
+      logger.error('DataManagementPage', 'データの取得に失敗しました', { error })
     } finally {
       setLoading(false)
     }

@@ -14,6 +14,7 @@ import { useSimulationStore } from '../store/simulationStore'
 import { formatCurrency, formatPercent } from '../utils/formatters'
 import { calculateProfitLossPercent } from '../utils/calculations'
 import { cn, getPnLClass, getConsecutiveLossStyle } from '../utils/classNames'
+import { logger } from '../utils/logger'
 import '../styles/components/AccountInfo.css'
 
 interface AccountInfoProps {
@@ -37,7 +38,7 @@ function AccountInfo({ refreshTrigger }: AccountInfoProps) {
         setAccount(res.data)
       }
     } catch (error) {
-      console.error('Failed to fetch account:', error)
+      logger.error('AccountInfo', `fetchAccount error ${error}`, { error })
     }
   }, [status])
 
@@ -53,7 +54,7 @@ function AccountInfo({ refreshTrigger }: AccountInfoProps) {
         setPerformance(res.data)
       }
     } catch (error) {
-      console.error('Failed to fetch performance:', error)
+      logger.error('AccountInfo', `fetchPerformance error ${error}`, { error })
     }
   }, [status])
 

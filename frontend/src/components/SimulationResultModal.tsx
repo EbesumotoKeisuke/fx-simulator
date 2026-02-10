@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { accountApi, tradesApi, Trade } from '../services/api'
+import { logger } from '../utils/logger'
 
 interface SimulationResultModalProps {
   isOpen: boolean
@@ -109,7 +110,7 @@ function SimulationResultModal({ isOpen, onClose }: SimulationResultModalProps) 
 
         }
       } else {
-        console.warn('[SimulationResult] No trades data or request failed')
+        logger.warning('SimulationResultModal', 'トレードデータがないか、リクエストに失敗しました')
       }
 
       const profitLossPercent = initialBalance > 0
@@ -138,7 +139,7 @@ function SimulationResultModal({ isOpen, onClose }: SimulationResultModalProps) 
 
       setResult(finalResult)
     } catch (error) {
-      console.error('[SimulationResult] Failed to fetch results:', error)
+      logger.error('SimulationResultModal', `fetchResults error : ${error}`, { error })
     } finally {
       setLoading(false)
     }

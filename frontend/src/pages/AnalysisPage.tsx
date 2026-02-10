@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { analyticsApi, tradesApi, PerformanceMetrics, EquityCurveData, DrawdownData, Trade, Candle } from '../services/api'
 import { useSimulationStore } from '../store/simulationStore'
 import { createChart, IChartApi, ISeriesApi, CandlestickData, Time } from 'lightweight-charts'
+import { logger } from '../utils/logger'
 
 /**
  * パフォーマンス分析ページコンポーネント
@@ -51,7 +52,7 @@ function AnalysisPage() {
           setDrawdown(ddRes.data)
         }
       } catch (error) {
-        console.error('Failed to fetch analytics data:', error)
+        logger.error('AnalysisPage', '分析データの取得に失敗しました', { error })
       } finally {
         setLoading(false)
       }
@@ -84,12 +85,12 @@ function AnalysisPage() {
           // タイムスタンプの検証
           const filteredCandles = validCandles.filter(candle => {
             if (!candle.timestamp) {
-              console.warn('Invalid candle: missing timestamp', candle)
+              logger.warning('AnalysisPage', 'Invalid candle: missing timestamp', { candle })
               return false
             }
             const date = new Date(candle.timestamp)
             if (isNaN(date.getTime())) {
-              console.warn('Invalid candle: invalid timestamp', candle.timestamp)
+              logger.warning('AnalysisPage', 'Invalid candle: invalid timestamp', { timestamp: candle.timestamp })
               return false
             }
             return true
@@ -99,12 +100,12 @@ function AnalysisPage() {
           setCandles(filteredCandles)
         } else {
           // データ取得に失敗した場合、空配列にリセット
-          console.warn('Chart data fetch failed or returned no data')
+          logger.warning('AnalysisPage', 'チャートデータの取得に失敗またはデータなし')
           setTrades([])
           setCandles([])
         }
       } catch (error) {
-        console.error('Failed to fetch chart data:', error)
+        logger.error('AnalysisPage', 'チャートデータの取得に失敗しました', { error })
         setChartError(error instanceof Error ? error.message : 'チャートデータの取得に失敗しました')
         // エラーが発生した場合も空配列にリセット
         setTrades([])
@@ -174,7 +175,7 @@ function AnalysisPage() {
         .map((candle) => {
           const timestamp = new Date(candle.timestamp).getTime() / 1000
           if (isNaN(timestamp)) {
-            console.warn('Invalid timestamp in candle:', candle)
+            logger.warning('AnalysisPage', 'Invalid timestamp in candle', { candle })
             return null
           }
           return {
@@ -188,7 +189,7 @@ function AnalysisPage() {
         .filter((data): data is CandlestickData => data !== null)
 
       if (chartData.length === 0) {
-        console.warn('No valid chart data after filtering')
+        logger.warning('AnalysisPage', 'フィルタリング後に有効なチャートデータがありません')
         chart.remove()
         return
       }
@@ -227,7 +228,7 @@ function AnalysisPage() {
       const markers = trades
         .flatMap((trade) => {
           if (!trade.opened_at || !trade.closed_at) {
-            console.warn('Trade missing timestamps:', trade)
+            logger.warning('AnalysisPage', 'Trade missing timestamps', { trade })
             return []
           }
 
@@ -235,7 +236,7 @@ function AnalysisPage() {
           const exitTime = new Date(trade.closed_at).getTime() / 1000
 
           if (isNaN(entryTime) || isNaN(exitTime)) {
-            console.warn('Invalid trade timestamps:', trade)
+            logger.warning('AnalysisPage', 'Invalid trade timestamps', { trade })
             return []
           }
 
@@ -244,7 +245,7 @@ function AnalysisPage() {
           const nearestExitTime = findNearestValidTime(exitTime)
 
           if (nearestEntryTime === null || nearestExitTime === null) {
-            console.warn('Could not find valid times for trade markers:', trade)
+            logger.warning('AnalysisPage', 'Could not find valid times for trade markers', { trade })
             return []
           }
 
@@ -296,7 +297,7 @@ function AnalysisPage() {
         candleSeriesRef.current = null
       }
     } catch (error) {
-      console.error('Failed to create or render chart:', error)
+      logger.error('AnalysisPage', 'チャートの作成または描画に失敗しました', { error })
       setChartError('チャートの描画に失敗しました')
     }
   }, [candles, trades])
@@ -325,7 +326,7 @@ function AnalysisPage() {
         window.location.reload()
       }
     } catch (error) {
-      console.error('Import failed:', error)
+      logger.error('AnalysisPage', 'インポートに失敗しました', { error })
       alert(error instanceof Error ? error.message : 'インポートに失敗しました')
     }
 

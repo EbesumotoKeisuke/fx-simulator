@@ -7,8 +7,10 @@ from sqlalchemy.orm import Session
 from src.utils.database import get_db
 from src.services.market_data_service import MarketDataService
 from src.services.csv_import_service import CSVImportService
+from src.utils.logger import get_logger
 
 router = APIRouter()
+logger = get_logger(__name__)
 
 
 @router.get("/candles")
@@ -20,19 +22,25 @@ async def get_candles(
     db: Session = Depends(get_db),
 ):
     """ローソク足データを取得する"""
-    if timeframe not in ["W1", "D1", "H1", "M10"]:
-        raise HTTPException(status_code=400, detail=f"Invalid timeframe: {timeframe}")
+    try:
+        if timeframe not in ["W1", "D1", "H1", "M10"]:
+            raise HTTPException(status_code=400, detail=f"Invalid timeframe: {timeframe}")
 
-    service = MarketDataService(db)
-    candles = service.get_candles(timeframe, start_time, end_time, limit)
+        service = MarketDataService(db)
+        candles = service.get_candles(timeframe, start_time, end_time, limit)
 
-    return {
-        "success": True,
-        "data": {
-            "timeframe": timeframe,
-            "candles": candles,
-        },
-    }
+        return {
+            "success": True,
+            "data": {
+                "timeframe": timeframe,
+                "candles": candles,
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"get_candles error : {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/candles/before")
@@ -43,19 +51,25 @@ async def get_candles_before(
     db: Session = Depends(get_db),
 ):
     """指定時刻より前のローソク足データを取得する（シミュレーション用）"""
-    if timeframe not in ["W1", "D1", "H1", "M10"]:
-        raise HTTPException(status_code=400, detail=f"Invalid timeframe: {timeframe}")
+    try:
+        if timeframe not in ["W1", "D1", "H1", "M10"]:
+            raise HTTPException(status_code=400, detail=f"Invalid timeframe: {timeframe}")
 
-    service = MarketDataService(db)
-    candles = service.get_candles_before(timeframe, before_time, limit)
+        service = MarketDataService(db)
+        candles = service.get_candles_before(timeframe, before_time, limit)
 
-    return {
-        "success": True,
-        "data": {
-            "timeframe": timeframe,
-            "candles": candles,
-        },
-    }
+        return {
+            "success": True,
+            "data": {
+                "timeframe": timeframe,
+                "candles": candles,
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"get_candles_before error : {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/candles/partial")
@@ -79,57 +93,75 @@ async def get_candles_partial(
         - candles: ローソク足データのリスト
         - data_missing: DBに該当時間足のデータが存在しない場合にTrue
     """
-    if timeframe not in ["W1", "D1", "H1", "M10"]:
-        raise HTTPException(status_code=400, detail=f"Invalid timeframe: {timeframe}")
+    try:
+        if timeframe not in ["W1", "D1", "H1", "M10"]:
+            raise HTTPException(status_code=400, detail=f"Invalid timeframe: {timeframe}")
 
-    service = MarketDataService(db)
-    candles, data_missing = service.get_candles_with_partial_last(timeframe, current_time, limit)
+        service = MarketDataService(db)
+        candles, data_missing = service.get_candles_with_partial_last(timeframe, current_time, limit)
 
-    return {
-        "success": True,
-        "data": {
-            "timeframe": timeframe,
-            "candles": candles,
-            "data_missing": data_missing,
-        },
-    }
+        return {
+            "success": True,
+            "data": {
+                "timeframe": timeframe,
+                "candles": candles,
+                "data_missing": data_missing,
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"get_candles_partial error : {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/timeframes")
 async def get_timeframes():
     """利用可能な時間足一覧を取得する"""
-    return {
-        "success": True,
-        "data": {
-            "timeframes": ["W1", "D1", "H1", "M10"],
-        },
-    }
+    try:
+        return {
+            "success": True,
+            "data": {
+                "timeframes": ["W1", "D1", "H1", "M10"],
+            },
+        }
+    except Exception as e:
+        logger.error(f"get_timeframes error : {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/date-range")
 async def get_date_range(db: Session = Depends(get_db)):
     """データの日付範囲を取得する"""
-    service = MarketDataService(db)
-    date_range = service.get_date_range()
+    try:
+        service = MarketDataService(db)
+        date_range = service.get_date_range()
 
-    return {
-        "success": True,
-        "data": date_range,
-    }
+        return {
+            "success": True,
+            "data": date_range,
+        }
+    except Exception as e:
+        logger.error(f"get_date_range error : {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/files")
 async def get_csv_files(db: Session = Depends(get_db)):
     """利用可能なCSVファイル一覧を取得する"""
-    service = CSVImportService(db)
-    files = service.get_available_files()
+    try:
+        service = CSVImportService(db)
+        files = service.get_available_files()
 
-    return {
-        "success": True,
-        "data": {
-            "files": files,
-        },
-    }
+        return {
+            "success": True,
+            "data": {
+                "files": files,
+            },
+        }
+    except Exception as e:
+        logger.error(f"get_csv_files error : {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/import/{timeframe}")
@@ -138,31 +170,43 @@ async def import_csv(
     db: Session = Depends(get_db),
 ):
     """指定した時間足のCSVファイルをインポートする"""
-    if timeframe not in ["W1", "D1", "H1", "M10"]:
-        raise HTTPException(status_code=400, detail=f"Invalid timeframe: {timeframe}")
-
-    service = CSVImportService(db)
     try:
+        if timeframe not in ["W1", "D1", "H1", "M10"]:
+            raise HTTPException(status_code=400, detail=f"Invalid timeframe: {timeframe}")
+
+        logger.info(f"CSVインポート開始: timeframe={timeframe}")
+        service = CSVImportService(db)
         result = service.import_csv(timeframe)
+        logger.info(f"CSVインポート完了: timeframe={timeframe}")
         return {
             "success": True,
             "data": result,
         }
+    except HTTPException:
+        raise
     except FileNotFoundError as e:
+        logger.error(f"import_csv error : CSVファイルが見つかりません - {e}")
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
+        logger.error(f"import_csv error : {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/import-all")
 async def import_all_csv(db: Session = Depends(get_db)):
     """すべての時間足のCSVファイルをインポートする"""
-    service = CSVImportService(db)
-    results = service.import_all()
+    try:
+        logger.info("全CSVインポート開始")
+        service = CSVImportService(db)
+        results = service.import_all()
+        logger.info("全CSVインポート完了")
 
-    return {
-        "success": True,
-        "data": {
-            "results": results,
-        },
-    }
+        return {
+            "success": True,
+            "data": {
+                "results": results,
+            },
+        }
+    except Exception as e:
+        logger.error(f"import_all_csv error : {e}")
+        raise HTTPException(status_code=500, detail=str(e))

@@ -135,11 +135,11 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
         await get().fetchAccount()
       } else {
         const errorMsg = res.error?.message || 'Failed to start simulation'
-        logger.error('SimulationStore', `シミュレーション開始失敗: ${errorMsg}`)
+        logger.error('SimulationStore', `startSimulation error : ${errorMsg}`)
         set({ error: errorMsg, isLoading: false })
       }
     } catch (error) {
-      logger.error('SimulationStore', 'シミュレーション開始エラー', { error })
+      logger.error('SimulationStore', `startSimulation error : ${error}`, { error })
       set({ error: String(error), isLoading: false })
     }
   },
@@ -157,11 +157,11 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
         })
       } else {
         const errorMsg = res.error?.message || 'Failed to stop simulation'
-        logger.error('SimulationStore', `シミュレーション停止失敗: ${errorMsg}`)
+        logger.error('SimulationStore', `stopSimulation error : ${errorMsg}`)
         set({ error: errorMsg, isLoading: false })
       }
     } catch (error) {
-      logger.error('SimulationStore', 'シミュレーション停止エラー', { error })
+      logger.error('SimulationStore', `stopSimulation error : ${error}`, { error })
       set({ error: String(error), isLoading: false })
     }
   },
@@ -201,7 +201,7 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
         set({ speed: res.data.speed })
       }
     } catch (error) {
-      console.error('Failed to set speed:', error)
+      logger.error('SimulationStore', `setSpeed error : ${error}`, { error })
     }
   },
 
@@ -217,7 +217,7 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
         })
       }
     } catch (error) {
-      console.error('Failed to fetch status:', error)
+      logger.error('SimulationStore', `fetchStatus error : ${error}`, { error })
     }
   },
 
@@ -228,7 +228,7 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
         set({ account: res.data })
       }
     } catch (error) {
-      console.error('Failed to fetch account:', error)
+      logger.error('SimulationStore', `fetchAccount error : ${error}`, { error })
     }
   },
 
@@ -242,7 +242,7 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
         })
       }
     } catch (error) {
-      console.error('Failed to fetch positions:', error)
+      logger.error('SimulationStore', `fetchPositions error : ${error}`, { error })
     }
   },
 

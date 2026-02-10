@@ -138,18 +138,39 @@ logger.info("シミュレーションを開始しました")
 # 警告ログ
 logger.warning(f"証拠金維持率が低下しています: {margin_rate}%")
 
-# エラーログ
-logger.error(f"注文作成に失敗しました: {error_message}")
+# エラーログ（統一フォーマット）
+logger.error(f"create_order error : {error_message}")
 
-# 重大エラーログ
-logger.critical(f"データベース接続に失敗しました: {exception}")
+# 重大エラーログ（統一フォーマット）
+logger.critical(f"【connect_database error : {exception}")
 ```
 
 ### 4.4 ログ出力フォーマット
 
 ```
 2026-02-10 12:30:45 - trading_service - INFO - trading_service.py:123 - 注文を作成しました: order_id=xxx
-2026-02-10 12:30:46 - trading_service - ERROR - trading_service.py:156 - 注文作成に失敗: ValueError: Invalid lot size
+2026-02-10 12:30:46 - trading_service - ERROR - trading_service.py:156 - 【create_order error : ValueError: Invalid lot size
+```
+
+### 4.5 エラーログフォーマット規約
+
+エラーログは以下の統一フォーマットで出力すること：
+
+```python
+logger.error(f"関数名 error : {エラー内容}")
+```
+
+**例:**
+```python
+def create_order(order_data):
+    try:
+        # 処理
+    except ValueError as e:
+        logger.error(f"create_order error : {e}")
+        raise
+    except Exception as e:
+        logger.error(f"create_order error : {e}")
+        raise
 ```
 
 ---
@@ -216,18 +237,38 @@ logger.info('OrderPanel', '注文パネルを開きました')
 // 警告ログ
 logger.warning('ChartPanel', 'データ読み込みに時間がかかっています')
 
-// エラーログ
-logger.error('API', 'シミュレーション開始に失敗しました', { error })
+// エラーログ（統一フォーマット）
+logger.error('API', '【startSimulation error : シミュレーション開始に失敗しました', { error })
 
-// 重大エラーログ
-logger.critical('App', 'アプリケーションエラーが発生しました', { error })
+// 重大エラーログ（統一フォーマット）
+logger.critical('App', '【componentDidCatch error : アプリケーションエラーが発生しました', { error })
 ```
 
 ### 5.4 コンソール出力フォーマット
 
 ```
 [2026-02-10 12:30:45] [INFO] [OrderPanel] 注文パネルを開きました
-[2026-02-10 12:30:46] [ERROR] [API] シミュレーション開始に失敗しました { error: ... }
+[2026-02-10 12:30:46] [ERROR] [API] 【startSimulation error : シミュレーション開始に失敗しました { error: ... }
+```
+
+### 5.5 エラーログフォーマット規約
+
+エラーログは以下の統一フォーマットで出力すること：
+
+```typescript
+logger.error('ソース名', '【関数名 error : {エラー内容}', { error })
+```
+
+**例:**
+```typescript
+const handleSubmit = async () => {
+  try {
+    // 処理
+  } catch (error) {
+    logger.error('OrderPanel', '【handleSubmit error : 注文の送信に失敗しました', { error })
+    throw error
+  }
+}
 ```
 
 ---
@@ -339,14 +380,15 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-try:
-    # 処理
-except ValueError as e:
-    logger.error(f"バリデーションエラー: {e}")
-    raise
-except Exception as e:
-    logger.critical(f"予期しないエラー: {e}", exc_info=True)
-    raise
+def process_data(data):
+    try:
+        # 処理
+    except ValueError as e:
+        logger.error(f"process_data error : {e}")
+        raise
+    except Exception as e:
+        logger.error(f"process_data error : {e}")
+        raise
 ```
 
 ### 10.2 フロントエンドエラーバウンダリ
@@ -354,8 +396,7 @@ except Exception as e:
 ```typescript
 class ErrorBoundary extends React.Component {
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    logger.critical('ErrorBoundary', 'Reactエラーが発生しました', {
-      error: error.message,
+    logger.critical('ErrorBoundary', `componentDidCatch error : ${error.message}`, {
       componentStack: errorInfo.componentStack,
     })
   }

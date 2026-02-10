@@ -216,7 +216,7 @@ class SimulationService:
                 "profit_loss": float(account.realized_pnl) if account else 0,
             }
         except Exception as e:
-            logger.error(f"シミュレーション停止に失敗しました: {e}", exc_info=True)
+            logger.error(f"stop error : {e}")
             return {"error": str(e)}
 
     def pause(self) -> dict:
@@ -429,7 +429,7 @@ class SimulationService:
                 "sltp_conflicts": sltp_result.get("conflict_positions", []),
             }
         except Exception as e:
-            logger.error(f"時刻更新に失敗しました: {e}", exc_info=True)
+            logger.error(f"advance_time error : {e}")
             self.db.rollback()
             return {"error": str(e)}
 

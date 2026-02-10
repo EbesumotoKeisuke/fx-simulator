@@ -19,6 +19,9 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from src.models.candle import Candle
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def is_market_open(timestamp: datetime) -> bool:

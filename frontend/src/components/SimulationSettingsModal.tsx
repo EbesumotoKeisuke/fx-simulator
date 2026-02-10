@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useSimulationStore } from '../store/simulationStore'
 import { marketDataApi } from '../services/api'
+import { logger } from '../utils/logger'
 
 interface SimulationSettingsModalProps {
   isOpen: boolean
@@ -53,7 +54,7 @@ function SimulationSettingsModal({ isOpen, onClose }: SimulationSettingsModalPro
         }
       }
     } catch (error) {
-      console.error('Failed to fetch date range:', error)
+      logger.error('SimulationSettingsModal', `fetchDateRange error : ${error}`, { error })
     }
   }
 

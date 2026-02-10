@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { alertsApi, Alert } from '../services/api'
 import { useSimulationStore } from '../store/simulationStore'
+import { logger } from '../utils/logger'
 
 /**
  * アラートバナーコンポーネント
@@ -28,7 +29,7 @@ function AlertBanner() {
         setAlerts(res.data.alerts)
       }
     } catch (error) {
-      console.error('Failed to fetch alerts:', error)
+      logger.error('AlertBanner', `fetchAlerts error : ${error}`, { error })
     }
   }, [isActive])
 

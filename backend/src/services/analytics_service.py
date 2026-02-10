@@ -19,6 +19,9 @@ from src.models.simulation import Simulation
 from src.models.account import Account
 from src.models.trade import Trade
 from src.models.position import Position
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class AnalyticsService:
@@ -80,137 +83,141 @@ class AnalyticsService:
                 - period: 期間情報
                 エラー時は {\"error\": \"エラーメッセージ\"}
         """
-        # 最新のシミュレーションを取得
-        simulation = self._get_latest_simulation()
-        if not simulation:
-            return {"error": "No simulation found"}
+        try:
+            # 最新のシミュレーションを取得
+            simulation = self._get_latest_simulation()
+            if not simulation:
+                return {"error": "No simulation found"}
 
-        # トレード履歴を取得
-        trades = (
-            self.db.query(Trade)
-            .filter(Trade.simulation_id == simulation.id)
-            .order_by(Trade.closed_at)
-            .all()
-        )
+            # トレード履歴を取得
+            trades = (
+                self.db.query(Trade)
+                .filter(Trade.simulation_id == simulation.id)
+                .order_by(Trade.closed_at)
+                .all()
+            )
 
-        if not trades:
-            # トレードがない場合はゼロ値を返す
+            if not trades:
+                # トレードがない場合はゼロ値を返す
+                return {
+                    "basic": {
+                        "win_rate": 0.0,
+                        "total_pnl": 0.0,
+                        "gross_profit": 0.0,
+                        "gross_loss": 0.0,
+                        "total_trades": 0,
+                        "winning_trades": 0,
+                        "losing_trades": 0,
+                    },
+                    "risk_return": {
+                        "profit_factor": 0.0,
+                        "average_win": 0.0,
+                        "average_loss": 0.0,
+                        "risk_reward_ratio": 0.0,
+                        "max_win": 0.0,
+                        "max_loss": 0.0,
+                        "max_win_pips": 0.0,
+                        "max_loss_pips": 0.0,
+                    },
+                    "drawdown": {
+                        "max_drawdown": 0.0,
+                        "max_drawdown_percent": 0.0,
+                        "max_drawdown_duration_days": 0,
+                    },
+                    "consecutive": {
+                        "max_consecutive_wins": 0,
+                        "max_consecutive_losses": 0,
+                    },
+                    "period": {
+                        "start_date": simulation.start_time.isoformat(),
+                        "end_date": simulation.current_time.isoformat(),
+                        "duration_days": 0,
+                    },
+                }
+
+            # 基本指標の計算
+            winning_trades = [t for t in trades if float(t.realized_pnl) > 0]
+            losing_trades = [t for t in trades if float(t.realized_pnl) < 0]
+            total_trades = len(trades)
+            winning_count = len(winning_trades)
+            losing_count = len(losing_trades)
+
+            win_rate = (winning_count / total_trades * 100) if total_trades > 0 else 0.0
+            total_pnl = sum(float(t.realized_pnl) for t in trades)
+            gross_profit = sum(float(t.realized_pnl) for t in winning_trades)
+            gross_loss = sum(float(t.realized_pnl) for t in losing_trades)
+
+            # リスク・リターン指標の計算
+            average_win = gross_profit / winning_count if winning_count > 0 else 0.0
+            average_loss = gross_loss / losing_count if losing_count > 0 else 0.0
+            profit_factor = (
+                gross_profit / abs(gross_loss) if gross_loss != 0 else 0.0
+            )
+            risk_reward_ratio = (
+                average_win / abs(average_loss) if average_loss != 0 else 0.0
+            )
+
+            max_win = max((float(t.realized_pnl) for t in winning_trades), default=0.0)
+            max_loss = min((float(t.realized_pnl) for t in losing_trades), default=0.0)
+            max_win_pips = max(
+                (float(t.realized_pnl_pips) for t in winning_trades), default=0.0
+            )
+            max_loss_pips = min(
+                (float(t.realized_pnl_pips) for t in losing_trades), default=0.0
+            )
+
+            # ドローダウン指標の計算
+            drawdown_data = self._calculate_drawdown(simulation.id)
+            max_drawdown = drawdown_data["max_drawdown"]
+            max_drawdown_percent = drawdown_data["max_drawdown_percent"]
+            max_drawdown_duration_days = drawdown_data["max_drawdown_duration_days"]
+
+            # 連続性指標の計算
+            consecutive_data = self._calculate_consecutive_wins_losses(trades)
+            max_consecutive_wins = consecutive_data["max_consecutive_wins"]
+            max_consecutive_losses = consecutive_data["max_consecutive_losses"]
+
+            # 期間情報
+            duration_days = (simulation.current_time - simulation.start_time).days
+
             return {
                 "basic": {
-                    "win_rate": 0.0,
-                    "total_pnl": 0.0,
-                    "gross_profit": 0.0,
-                    "gross_loss": 0.0,
-                    "total_trades": 0,
-                    "winning_trades": 0,
-                    "losing_trades": 0,
+                    "win_rate": round(win_rate, 1),
+                    "total_pnl": round(total_pnl, 2),
+                    "gross_profit": round(gross_profit, 2),
+                    "gross_loss": round(gross_loss, 2),
+                    "total_trades": total_trades,
+                    "winning_trades": winning_count,
+                    "losing_trades": losing_count,
                 },
                 "risk_return": {
-                    "profit_factor": 0.0,
-                    "average_win": 0.0,
-                    "average_loss": 0.0,
-                    "risk_reward_ratio": 0.0,
-                    "max_win": 0.0,
-                    "max_loss": 0.0,
-                    "max_win_pips": 0.0,
-                    "max_loss_pips": 0.0,
+                    "profit_factor": round(profit_factor, 2),
+                    "average_win": round(average_win, 2),
+                    "average_loss": round(average_loss, 2),
+                    "risk_reward_ratio": round(risk_reward_ratio, 3),
+                    "max_win": round(max_win, 2),
+                    "max_loss": round(max_loss, 2),
+                    "max_win_pips": round(max_win_pips, 1),
+                    "max_loss_pips": round(max_loss_pips, 1),
                 },
                 "drawdown": {
-                    "max_drawdown": 0.0,
-                    "max_drawdown_percent": 0.0,
-                    "max_drawdown_duration_days": 0,
+                    "max_drawdown": round(max_drawdown, 2),
+                    "max_drawdown_percent": round(max_drawdown_percent, 2),
+                    "max_drawdown_duration_days": max_drawdown_duration_days,
                 },
                 "consecutive": {
-                    "max_consecutive_wins": 0,
-                    "max_consecutive_losses": 0,
+                    "max_consecutive_wins": max_consecutive_wins,
+                    "max_consecutive_losses": max_consecutive_losses,
                 },
                 "period": {
                     "start_date": simulation.start_time.isoformat(),
                     "end_date": simulation.current_time.isoformat(),
-                    "duration_days": 0,
+                    "duration_days": duration_days,
                 },
             }
-
-        # 基本指標の計算
-        winning_trades = [t for t in trades if float(t.realized_pnl) > 0]
-        losing_trades = [t for t in trades if float(t.realized_pnl) < 0]
-        total_trades = len(trades)
-        winning_count = len(winning_trades)
-        losing_count = len(losing_trades)
-
-        win_rate = (winning_count / total_trades * 100) if total_trades > 0 else 0.0
-        total_pnl = sum(float(t.realized_pnl) for t in trades)
-        gross_profit = sum(float(t.realized_pnl) for t in winning_trades)
-        gross_loss = sum(float(t.realized_pnl) for t in losing_trades)
-
-        # リスク・リターン指標の計算
-        average_win = gross_profit / winning_count if winning_count > 0 else 0.0
-        average_loss = gross_loss / losing_count if losing_count > 0 else 0.0
-        profit_factor = (
-            gross_profit / abs(gross_loss) if gross_loss != 0 else 0.0
-        )
-        risk_reward_ratio = (
-            average_win / abs(average_loss) if average_loss != 0 else 0.0
-        )
-
-        max_win = max((float(t.realized_pnl) for t in winning_trades), default=0.0)
-        max_loss = min((float(t.realized_pnl) for t in losing_trades), default=0.0)
-        max_win_pips = max(
-            (float(t.realized_pnl_pips) for t in winning_trades), default=0.0
-        )
-        max_loss_pips = min(
-            (float(t.realized_pnl_pips) for t in losing_trades), default=0.0
-        )
-
-        # ドローダウン指標の計算
-        drawdown_data = self._calculate_drawdown(simulation.id)
-        max_drawdown = drawdown_data["max_drawdown"]
-        max_drawdown_percent = drawdown_data["max_drawdown_percent"]
-        max_drawdown_duration_days = drawdown_data["max_drawdown_duration_days"]
-
-        # 連続性指標の計算
-        consecutive_data = self._calculate_consecutive_wins_losses(trades)
-        max_consecutive_wins = consecutive_data["max_consecutive_wins"]
-        max_consecutive_losses = consecutive_data["max_consecutive_losses"]
-
-        # 期間情報
-        duration_days = (simulation.current_time - simulation.start_time).days
-
-        return {
-            "basic": {
-                "win_rate": round(win_rate, 1),
-                "total_pnl": round(total_pnl, 2),
-                "gross_profit": round(gross_profit, 2),
-                "gross_loss": round(gross_loss, 2),
-                "total_trades": total_trades,
-                "winning_trades": winning_count,
-                "losing_trades": losing_count,
-            },
-            "risk_return": {
-                "profit_factor": round(profit_factor, 2),
-                "average_win": round(average_win, 2),
-                "average_loss": round(average_loss, 2),
-                "risk_reward_ratio": round(risk_reward_ratio, 3),
-                "max_win": round(max_win, 2),
-                "max_loss": round(max_loss, 2),
-                "max_win_pips": round(max_win_pips, 1),
-                "max_loss_pips": round(max_loss_pips, 1),
-            },
-            "drawdown": {
-                "max_drawdown": round(max_drawdown, 2),
-                "max_drawdown_percent": round(max_drawdown_percent, 2),
-                "max_drawdown_duration_days": max_drawdown_duration_days,
-            },
-            "consecutive": {
-                "max_consecutive_wins": max_consecutive_wins,
-                "max_consecutive_losses": max_consecutive_losses,
-            },
-            "period": {
-                "start_date": simulation.start_time.isoformat(),
-                "end_date": simulation.current_time.isoformat(),
-                "duration_days": duration_days,
-            },
-        }
+        except Exception as e:
+            logger.error(f"get_performance_metrics error : {e}")
+            return {"error": str(e)}
 
     def _calculate_consecutive_wins_losses(self, trades: List[Trade]) -> dict:
         """

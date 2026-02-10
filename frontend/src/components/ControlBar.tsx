@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { ordersApi } from '../services/api'
 import { useSimulationStore } from '../store/simulationStore'
+import { logger } from '../utils/logger'
 
 /** 1ロットあたりの通貨単位（100,000通貨） */
 const LOT_UNIT = 100000
@@ -82,7 +83,7 @@ function ControlBar({
   const canControl = isRunning || isPaused
 
   // デバッグ用：ステータスとボタン有効化状態を確認
-  console.log('[ControlBar] status:', status, 'canTrade:', canTrade, 'canControl:', canControl)
+  logger.debug('ControlBar', 'ステータス確認', { status, canTrade, canControl })
 
   /**
    * 実際のロット数を計算（通貨単位 / 100,000）
@@ -141,6 +142,7 @@ function ControlBar({
         setOrderMessage(`エラー: ${res.error?.message || '注文に失敗しました'}`)
       }
     } catch (error) {
+      logger.error('ControlBar', `handleOrder error : ${error}`, { error })
       setOrderMessage(`エラー: ${error}`)
     } finally {
       setIsOrdering(false)

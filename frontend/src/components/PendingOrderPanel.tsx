@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { ordersApi, PendingOrder } from '../services/api'
 import { useSimulationStore } from '../store/simulationStore'
+import { logger } from '../utils/logger'
 
 interface PendingOrderPanelProps {
   refreshTrigger?: number
@@ -26,7 +27,7 @@ function PendingOrderPanel({ refreshTrigger }: PendingOrderPanelProps) {
         setOrders(res.data.orders)
       }
     } catch (error) {
-      console.error('Failed to fetch pending orders:', error)
+      logger.error('PendingOrderPanel', `fetchPendingOrders error : ${error}`, { error })
     }
   }, [status])
 
@@ -55,6 +56,7 @@ function PendingOrderPanel({ refreshTrigger }: PendingOrderPanelProps) {
         alert(`キャンセルエラー: ${res.error?.message}`)
       }
     } catch (error) {
+      logger.error('PendingOrderPanel', `handleCancel error : ${error}`, { orderId, error })
       alert(`キャンセルエラー: ${error}`)
     } finally {
       setCancellingId(null)
@@ -72,6 +74,7 @@ function PendingOrderPanel({ refreshTrigger }: PendingOrderPanelProps) {
       }
       await fetchPendingOrders()
     } catch (error) {
+      logger.error('PendingOrderPanel', `handleCancelAll error : ${error}`, { error })
       alert(`キャンセルエラー: ${error}`)
     } finally {
       setLoading(false)
@@ -114,6 +117,7 @@ function PendingOrderPanel({ refreshTrigger }: PendingOrderPanelProps) {
         alert(`更新エラー: ${res.error?.message}`)
       }
     } catch (error) {
+      logger.error('PendingOrderPanel', `handleSaveEdit error : ${error}`, { orderId: editingOrder.order_id, error })
       alert(`更新エラー: ${error}`)
     } finally {
       setIsSaving(false)

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ordersApi, PendingOrderRequest, AccountInfo } from '../services/api'
 import { useSimulationStore } from '../store/simulationStore'
+import { logger } from '../utils/logger'
 import LoadingSpinner from './LoadingSpinner'
 
 interface OrderPanelProps {
@@ -111,12 +112,15 @@ function OrderPanel({
       const res = await ordersApi.create(orderData)
 
       if (res.success) {
+        logger.info('OrderPanel', `成行注文約定: side=${side}, lot_size=${actualLotSize()}`)
         setMessage(`${side === 'buy' ? '買い' : '売り'}注文が約定しました`)
         onRefresh?.()
       } else {
+        logger.warning('OrderPanel', `成行注文エラー: ${res.error?.message}`)
         setMessage(`エラー: ${res.error?.message}`)
       }
     } catch (error) {
+      logger.error('OrderPanel', `handleMarketOrder error : ${error}`, { error })
       setMessage(`エラー: ${error}`)
     } finally {
       setIsOrdering(false)
@@ -151,13 +155,16 @@ function OrderPanel({
 
       if (res.success) {
         const typeLabel = orderType === 'limit' ? '指値' : '逆指値'
+        logger.info('OrderPanel', `予約注文作成: type=${orderType}, side=${side}, lot_size=${actualLotSize()}`)
         setMessage(`${typeLabel}注文を作成しました`)
         setTriggerPrice('')
         onRefresh?.()
       } else {
+        logger.warning('OrderPanel', `予約注文エラー: ${res.error?.message}`)
         setMessage(`エラー: ${res.error?.message}`)
       }
     } catch (error) {
+      logger.error('OrderPanel', `handlePendingOrder error : ${error}`, { error })
       setMessage(`エラー: ${error}`)
     } finally {
       setIsOrdering(false)
