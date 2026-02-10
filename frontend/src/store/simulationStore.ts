@@ -10,6 +10,7 @@
 
 import { create } from 'zustand'
 import { simulationApi, accountApi, positionsApi, Position, AccountInfo } from '../services/api'
+import { logger } from '../utils/logger'
 
 /**
  * シミュレーション状態のインターフェース
@@ -113,6 +114,7 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
    */
   startSimulation: async (startTime, initialBalance, speed = 1.0) => {
     set({ isLoading: true, error: null })
+    logger.info('SimulationStore', `シミュレーション開始: startTime=${startTime.toISOString()}, initialBalance=${initialBalance}`)
     try {
       const res = await simulationApi.start({
         // JSTのままAPIに送信（UTCに変換しない）
@@ -121,6 +123,7 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
         speed,
       })
       if (res.success && res.data) {
+        logger.info('SimulationStore', `シミュレーション開始成功: id=${res.data.simulation_id}`)
         set({
           simulationId: res.data.simulation_id,
           status: res.data.status,
@@ -131,26 +134,34 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
         // 口座情報を取得
         await get().fetchAccount()
       } else {
-        set({ error: res.error?.message || 'Failed to start simulation', isLoading: false })
+        const errorMsg = res.error?.message || 'Failed to start simulation'
+        logger.error('SimulationStore', `シミュレーション開始失敗: ${errorMsg}`)
+        set({ error: errorMsg, isLoading: false })
       }
     } catch (error) {
+      logger.error('SimulationStore', 'シミュレーション開始エラー', { error })
       set({ error: String(error), isLoading: false })
     }
   },
 
   stopSimulation: async () => {
     set({ isLoading: true, error: null })
+    logger.info('SimulationStore', 'シミュレーション停止')
     try {
       const res = await simulationApi.stop()
       if (res.success && res.data) {
+        logger.info('SimulationStore', 'シミュレーション停止成功')
         set({
           status: 'stopped',
           isLoading: false,
         })
       } else {
-        set({ error: res.error?.message || 'Failed to stop simulation', isLoading: false })
+        const errorMsg = res.error?.message || 'Failed to stop simulation'
+        logger.error('SimulationStore', `シミュレーション停止失敗: ${errorMsg}`)
+        set({ error: errorMsg, isLoading: false })
       }
     } catch (error) {
+      logger.error('SimulationStore', 'シミュレーション停止エラー', { error })
       set({ error: String(error), isLoading: false })
     }
   },

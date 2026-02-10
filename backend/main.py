@@ -4,7 +4,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text, inspect
 
-from src.routes import market_data, simulation, orders, positions, account, trades, analytics, alerts
+from src.routes import market_data, simulation, orders, positions, account, trades, analytics, alerts, logs
+from src.utils.logger import get_logger
+
+# ロガーを初期化
+logger = get_logger(__name__)
 from src.utils.database import engine, Base
 from src.models import candle, simulation as sim_model, account as acc_model, order, position, trade, pending_order
 
@@ -28,11 +32,20 @@ def run_migrations():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 起動時: テーブル作成
-    Base.metadata.create_all(bind=engine)
-    # マイグレーション実行
-    run_migrations()
+    logger.info("アプリケーションを起動しています...")
+    try:
+        Base.metadata.create_all(bind=engine)
+        logger.info("データベーステーブルを作成しました")
+        # マイグレーション実行
+        run_migrations()
+        logger.info("マイグレーションが完了しました")
+        logger.info("FX Trade Simulator API が起動しました")
+    except Exception as e:
+        logger.critical(f"アプリケーション起動に失敗しました: {e}")
+        raise
     yield
-    # 終了時: 特に処理なし
+    # 終了時
+    logger.info("アプリケーションをシャットダウンしています...")
 
 
 app = FastAPI(
@@ -60,6 +73,7 @@ app.include_router(account.router, prefix="/api/v1/account", tags=["Account"])
 app.include_router(trades.router, prefix="/api/v1/trades", tags=["Trades"])
 app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["Analytics"])
 app.include_router(alerts.router, prefix="/api/v1/alerts", tags=["Alerts"])
+app.include_router(logs.router, prefix="/api", tags=["Logs"])
 
 
 @app.get("/")

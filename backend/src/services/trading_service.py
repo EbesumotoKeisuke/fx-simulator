@@ -25,6 +25,9 @@ from src.models.position import Position
 from src.models.trade import Trade
 from src.models.pending_order import PendingOrder
 from src.services.market_data_service import MarketDataService
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 # 1ロットあたりの通貨単位（100,000通貨 = 1スタンダードロット）
@@ -292,6 +295,8 @@ class TradingService:
         self.db.add(position)
         self.db.commit()
 
+        logger.info(f"注文を作成しました: order_id={order.id}, side={side}, lot_size={lot_size}, entry_price={current_price}")
+
         return {
             "order_id": str(order.id),
             "position_id": str(position.id),
@@ -507,6 +512,8 @@ class TradingService:
         # 0 <= pnl_pips < 30 の場合は何もしない（維持）
 
         self.db.commit()
+
+        logger.info(f"ポジションを決済しました: position_id={position.id}, pnl={realized_pnl:.2f}円 ({pnl_pips:.1f}pips)")
 
         return {
             "position_id": str(position.id),

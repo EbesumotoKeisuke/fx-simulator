@@ -30,6 +30,12 @@ Thumbs.db
 
 # Project specific
 data/*.csv
+
+# Logs - フォルダは管理、中身は除外
+logs/**/*
+!logs/.gitkeep
+!logs/backend/.gitkeep
+!logs/frontend/.gitkeep
 *.log
 
 # Unfinished specifications
