@@ -7,6 +7,8 @@
  * @module api
  */
 
+import { logger } from '../utils/logger'
+
 /** APIのベースURL（環境変数で上書き可能） */
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'
 
@@ -63,11 +65,13 @@ async function fetchApi<T>(
 
   // HTTPステータスコードが200番台以外の場合はエラーレスポンスを返す
   if (!response.ok) {
+    const errorMessage = data.detail || 'An error occurred'
+    logger.error('API', `APIエラー: ${endpoint}`, { status: response.status, message: errorMessage })
     return {
       success: false,
       error: {
         code: 'API_ERROR',
-        message: data.detail || 'An error occurred',
+        message: errorMessage,
       },
     }
   }

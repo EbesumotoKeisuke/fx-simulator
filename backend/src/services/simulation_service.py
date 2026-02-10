@@ -26,6 +26,9 @@ from src.models.position import Position
 from src.models.trade import Trade
 from src.models.pending_order import PendingOrder
 from src.services.trading_service import TradingService
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class SimulationService:
@@ -90,11 +93,14 @@ class SimulationService:
                 - speed (float): 再生速度
                 - balance (float): 口座残高
         """
+        logger.info(f"シミュレーション開始: start_time={start_time}, initial_balance={initial_balance}, speed={speed}")
+
         # 既存のアクティブなシミュレーションがあれば停止
         active = self.get_active_simulation()
         if active:
             active.status = "stopped"
             active.end_time = datetime.utcnow()
+            logger.info(f"既存のシミュレーションを停止しました: {active.id}")
 
         # 新しいシミュレーションを作成
         simulation = Simulation(
@@ -116,6 +122,8 @@ class SimulationService:
         )
         self.db.add(account)
         self.db.commit()
+
+        logger.info(f"シミュレーションを作成しました: simulation_id={simulation.id}")
 
         return {
             "simulation_id": str(simulation.id),
@@ -162,9 +170,10 @@ class SimulationService:
             for position in open_positions:
                 try:
                     trading_service.close_position(str(position.id))
+                    logger.info(f"ポジションをクローズしました: position_id={position.id}")
                 except Exception as e:
                     # ポジションクローズに失敗してもシミュレーション終了は継続
-                    print(f"Failed to close position {position.id}: {e}")
+                    logger.warning(f"ポジションのクローズに失敗しました: position_id={position.id}, error={e}")
 
             # 全ての未約定注文を自動的にキャンセルする（ステータス変更前）
             pending_orders = (
@@ -197,6 +206,8 @@ class SimulationService:
 
             self.db.commit()
 
+            logger.info(f"シミュレーションを停止しました: simulation_id={simulation.id}, final_balance={float(account.balance) if account else 0}, total_trades={trade_count}")
+
             return {
                 "simulation_id": str(simulation.id),
                 "status": simulation.status,
@@ -205,9 +216,7 @@ class SimulationService:
                 "profit_loss": float(account.realized_pnl) if account else 0,
             }
         except Exception as e:
-            print(f"Error in stop(): {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"シミュレーション停止に失敗しました: {e}", exc_info=True)
             return {"error": str(e)}
 
     def pause(self) -> dict:
@@ -375,7 +384,7 @@ class SimulationService:
                 if next_data:
                     new_time = datetime.fromisoformat(next_data['timestamp'])
                     skipped = True
-                    print(f"[advance_time] Market closed, skipped to {new_time.isoformat()}")
+                    logger.info(f"市場営業時間外のため時刻をスキップしました: {new_time.isoformat()}")
                 else:
                     return {"error": "No more data available - simulation reached end of data"}
             else:
@@ -388,7 +397,7 @@ class SimulationService:
                     if next_data:
                         new_time = datetime.fromisoformat(next_data['timestamp'])
                         skipped = True
-                        print(f"[advance_time] Data gap detected, skipped to {new_time.isoformat()}")
+                        logger.info(f"データギャップを検出、時刻をスキップしました: {new_time.isoformat()}")
                     else:
                         return {"error": "No more data available - simulation reached end of data"}
 
@@ -399,9 +408,7 @@ class SimulationService:
             try:
                 trading_service.check_pending_orders_execution(str(simulation.id), new_time)
             except Exception as e:
-                print(f"Warning: check_pending_orders_execution failed: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.warning(f"予約注文の約定チェックに失敗しました: {e}", exc_info=True)
                 # 予約注文チェックが失敗しても処理を継続
 
             # SL/TPの判定を実行
@@ -409,9 +416,7 @@ class SimulationService:
             try:
                 sltp_result = trading_service.check_sltp_triggers(str(simulation.id), new_time)
             except Exception as e:
-                print(f"Warning: check_sltp_triggers failed: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.warning(f"SL/TPチェックに失敗しました: {e}", exc_info=True)
                 # SL/TPチェックが失敗しても処理を継続
 
             self.db.commit()
@@ -424,9 +429,7 @@ class SimulationService:
                 "sltp_conflicts": sltp_result.get("conflict_positions", []),
             }
         except Exception as e:
-            print(f"Error in advance_time(): {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"時刻更新に失敗しました: {e}", exc_info=True)
             self.db.rollback()
             return {"error": str(e)}
 
