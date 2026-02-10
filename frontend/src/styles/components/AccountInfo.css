@@ -1,0 +1,94 @@
+/**
+ * AccountInfo コンポーネントスタイル
+ * 口座情報とパフォーマンス指標を横並びで表示
+ */
+
+.account-info {
+  background-color: var(--bg-card);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  height: 100%;
+  overflow: hidden;
+}
+
+.account-info__title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-strong);
+  margin-bottom: 0.5rem;
+}
+
+.account-info__empty {
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 1.125rem;
+  padding: 0.5rem 0;
+}
+
+.account-info__content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  font-size: 1rem;
+}
+
+.account-info__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.5rem;
+}
+
+/* トータル損益行のハイライトスタイル */
+.account-info__row--highlight {
+  margin-top: 0.25rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.account-info__item {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.account-info__label {
+  color: var(--text-primary);
+}
+
+/* トータル損益ラベルのハイライト */
+.account-info__label--highlight {
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.account-info__value {
+  color: var(--text-strong);
+}
+
+.account-info__value--bold {
+  font-weight: 600;
+}
+
+/* トータル損益値のハイライト */
+.account-info__value--highlight {
+  font-weight: 700;
+  font-size: 1.125rem;
+}
+
+.account-info__percent {
+  color: inherit;
+  margin-left: 0;
+}
+
+.account-info__subtitle {
+  color: var(--text-secondary);
+  margin-left: 0.25rem;
+}
+
+.account-info__consecutive-losses {
+  padding: 0.125rem 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}

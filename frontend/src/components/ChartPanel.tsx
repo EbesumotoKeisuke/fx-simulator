@@ -3,24 +3,6 @@ import { createChart, IChartApi, ISeriesApi, CandlestickData, Time, MouseEventPa
 import { marketDataApi, Candle, ordersApi, tradesApi } from '../services/api'
 
 /**
- * ISO週番号を取得する関数
- * @param date 対象日時
- * @returns ISO週番号（年と週番号を組み合わせた数値）
- */
-const getISOWeek = (date: Date): number => {
-  const target = new Date(date.valueOf())
-  const dayNr = (date.getDay() + 6) % 7
-  target.setDate(target.getDate() - dayNr + 3)
-  const firstThursday = target.valueOf()
-  target.setMonth(0, 1)
-  if (target.getDay() !== 4) {
-    target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7)
-  }
-  const weekNumber = 1 + Math.ceil((firstThursday - target.valueOf()) / 604800000)
-  return date.getFullYear() * 100 + weekNumber
-}
-
-/**
  * ローソク足の境界を越えたかをチェックする関数
  *
  * F-002: リアルタイムローソク足更新機能
@@ -28,13 +10,11 @@ const getISOWeek = (date: Date): number => {
  * これにより、上位時間足（H1, D1, W1）の最新のローソク足が
  * 10分足が更新されるたびにリアルタイムで更新される。
  *
- * @param timeframe タイムフレーム（参照用、実際の判定には使用しない）
  * @param lastTime 前回の更新時刻
  * @param currentTime 現在の時刻
  * @returns 境界を越えた場合はtrue
  */
 const shouldUpdateCandle = (
-  timeframe: 'W1' | 'D1' | 'H1' | 'M10',
   lastTime: Date,
   currentTime: Date
 ): boolean => {
@@ -264,7 +244,7 @@ function ChartPanel({
 
     // Throttle: ローソク足の境界を越えたかをチェック
     if (currentTime && lastUpdateTimeRef.current) {
-      if (!shouldUpdateCandle(timeframe, lastUpdateTimeRef.current, currentTime)) {
+      if (!shouldUpdateCandle(lastUpdateTimeRef.current, currentTime)) {
         // まだ境界を越えていないのでスキップ
         return
       }
