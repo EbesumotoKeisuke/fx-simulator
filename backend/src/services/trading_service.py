@@ -176,6 +176,71 @@ class TradingService:
 
         return total_margin
 
+    def _get_margin_by_side(self, simulation_id: str) -> dict:
+        """
+        買い・売りそれぞれの使用証拠金を計算する（内部メソッド・両建て対応）
+
+        Args:
+            simulation_id (str): シミュレーションID
+
+        Returns:
+            dict: {"buy": 買い証拠金, "sell": 売り証拠金}
+        """
+        # 保有中のポジションを取得
+        open_positions = (
+            self.db.query(Position)
+            .filter(Position.simulation_id == simulation_id)
+            .filter(Position.status == "open")
+            .all()
+        )
+
+        buy_margin = 0.0
+        sell_margin = 0.0
+
+        for pos in open_positions:
+            margin = self._calculate_required_margin(
+                float(pos.entry_price), float(pos.lot_size)
+            )
+            if pos.side == "buy":
+                buy_margin += margin
+            else:  # sell
+                sell_margin += margin
+
+        return {"buy": buy_margin, "sell": sell_margin}
+
+    def _get_unrealized_pnl(self, simulation: Simulation) -> float:
+        """
+        含み損益を計算する（内部メソッド）
+
+        Args:
+            simulation (Simulation): シミュレーションオブジェクト
+
+        Returns:
+            float: 含み損益（円）
+        """
+        current_price = self._get_current_price(simulation)
+        if not current_price:
+            return 0.0
+
+        positions = (
+            self.db.query(Position)
+            .filter(Position.simulation_id == simulation.id)
+            .filter(Position.status == "open")
+            .all()
+        )
+
+        total_unrealized_pnl = 0.0
+        for pos in positions:
+            entry_price = float(pos.entry_price)
+            if pos.side == "buy":
+                unrealized_pnl_pips = (current_price - entry_price) / PIPS_UNIT
+            else:
+                unrealized_pnl_pips = (entry_price - current_price) / PIPS_UNIT
+            unrealized_pnl = unrealized_pnl_pips * float(pos.lot_size) * LOT_UNIT * PIPS_UNIT
+            total_unrealized_pnl += unrealized_pnl
+
+        return total_unrealized_pnl
+
     def create_order(
         self,
         side: str,
@@ -225,18 +290,25 @@ class TradingService:
         if not current_price:
             return {"error": "Could not get current price"}
 
-        # 証拠金チェック
+        # 証拠金チェック（両建て対応）
         # 新規ポジションの必要証拠金を計算
         required_margin = self._calculate_required_margin(current_price, lot_size)
 
-        # 現在の使用証拠金を計算
-        used_margin = self._get_total_used_margin(simulation.id)
+        # 有効証拠金を計算（残高 + 含み損益）
+        unrealized_pnl = self._get_unrealized_pnl(simulation)
+        equity = float(account.balance) + unrealized_pnl
 
-        # 合計証拠金が口座残高を超えないかチェック
-        total_required_margin = used_margin + required_margin
-        if total_required_margin > float(account.balance):
+        # 買い・売りそれぞれの使用証拠金を取得
+        margin_by_side = self._get_margin_by_side(simulation.id)
+
+        # 同じ方向の使用証拠金 + 新規注文の証拠金をチェック
+        # 両建ての場合、買いと売りは別々に有効証拠金に対してチェック
+        current_side_margin = margin_by_side[side]
+        total_side_margin = current_side_margin + required_margin
+
+        if total_side_margin > equity:
             return {
-                "error": f"証拠金不足: 必要証拠金 ¥{int(total_required_margin):,} > 残高 ¥{int(account.balance):,}"
+                "error": f"証拠金不足: {side}の必要証拠金 ¥{int(total_side_margin):,} > 有効証拠金 ¥{int(equity):,}"
             }
 
         # 注文を作成
