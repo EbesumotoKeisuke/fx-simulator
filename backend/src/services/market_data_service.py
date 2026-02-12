@@ -77,6 +77,68 @@ def filter_market_hours(candles: List[Candle], timeframe: str = 'M10') -> List[C
     return [c for c in candles if is_market_open(c.timestamp)]
 
 
+def calculate_ema(prices: list[float], period: int = 20) -> list[Optional[float]]:
+    """
+    指数移動平均（EMA）を計算する
+
+    EMA = (終値 - 前回EMA) × 乗数 + 前回EMA
+    乗数 = 2 / (期間 + 1)
+
+    Args:
+        prices (list[float]): 終値のリスト（時系列順）
+        period (int): EMAの期間（デフォルト20）
+
+    Returns:
+        list[Optional[float]]: EMA値のリスト（最初のperiod-1件はNone）
+    """
+    if len(prices) < period:
+        return [None] * len(prices)
+
+    ema_values: list[Optional[float]] = []
+    multiplier = 2 / (period + 1)
+
+    # 最初のEMAは単純移動平均（SMA）で計算
+    sma = sum(prices[:period]) / period
+    ema_values.extend([None] * (period - 1))
+    ema_values.append(sma)
+
+    # 以降はEMA公式で計算
+    prev_ema = sma
+    for price in prices[period:]:
+        ema = (price - prev_ema) * multiplier + prev_ema
+        ema_values.append(ema)
+        prev_ema = ema
+
+    return ema_values
+
+
+def add_ema_to_candles(candles: list[dict], period: int = 20) -> list[dict]:
+    """
+    ローソク足データにEMA値を追加する
+
+    Args:
+        candles (list[dict]): ローソク足データのリスト
+        period (int): EMAの期間（デフォルト20）
+
+    Returns:
+        list[dict]: EMA値（ema20）が追加されたローソク足データのリスト
+    """
+    if not candles:
+        return candles
+
+    # 終値のリストを抽出
+    closes = [c['close'] for c in candles]
+
+    # EMAを計算
+    ema_values = calculate_ema(closes, period)
+
+    # 各ローソク足にEMA値を追加
+    for i, candle in enumerate(candles):
+        candle['ema20'] = ema_values[i]
+
+    return candles
+
+
 class MarketDataService:
     """
     市場データサービスクラス
@@ -453,6 +515,9 @@ class MarketDataService:
         例：current_time が 12:30 の場合、1時間足の 12:00 台のローソク足は
         12:00〜12:30 のデータのみから生成される。
 
+        H1は常にM10データから動的に生成する。これにより、H1 CSVデータに欠損が
+        あっても、M10データが存在する限り正しくチャートが表示される。
+
         Args:
             timeframe (str): 時間足（'W1', 'D1', 'H1', 'M10'）
             current_time (datetime): シミュレーション時刻
@@ -478,17 +543,21 @@ class MarketDataService:
             candles = self.get_candles_before(timeframe, current_time, limit)
             return candles, len(candles) == 0
 
+        # H1はDBから取得し、欠損箇所のみM10から補完する
+        if timeframe == 'H1':
+            return self._get_h1_with_gap_fill(current_time, limit)
+
         # 1. 最新のローソク足の開始時刻を計算
         latest_candle_start = self.calculate_candle_start_time(timeframe, current_time)
 
-        # 2. current_time以前の全てのローソク足を取得（旧APIと同じ）
+        # 2. current_time以前の全てのローソク足を取得
         all_candles = self.get_candles_before(timeframe, current_time, limit)
 
         # データ不足フラグ: DBに該当時間足のデータが存在しない場合にTrue
         data_missing = len(all_candles) == 0
 
         if not all_candles:
-            # データが0件の場合、空のリストを返す（自動生成しない）
+            # データが0件の場合、空のリストを返す
             return [], True
 
         # 2.5. 日足の場合、タイムスタンプが7:00未満のローソク足の時刻を7:00に調整
@@ -521,3 +590,243 @@ class MarketDataService:
             filtered_candles.append(partial_candle)
 
         return filtered_candles, data_missing
+
+    def _get_h1_with_gap_fill(
+        self,
+        current_time: datetime,
+        limit: int = 100,
+    ) -> tuple[list[dict], bool]:
+        """
+        H1データをDBから取得し、欠損箇所のみM10から補完する
+
+        パフォーマンスを考慮したハイブリッド方式：
+        - H1データが存在する箇所は直接DBから取得（高速）
+        - H1データが欠損している箇所のみM10から動的生成
+
+        Args:
+            current_time (datetime): シミュレーション時刻
+            limit (int, optional): 取得件数上限。デフォルトは100
+
+        Returns:
+            tuple[list[dict], bool]: (ローソク足データのリスト, データ不足フラグ)
+        """
+        # 1. まずDBからH1データを取得
+        h1_candles = self.get_candles_before('H1', current_time, limit)
+
+        # H1データが0件の場合は全てM10から生成
+        if not h1_candles:
+            return self._generate_h1_from_m10(current_time, limit)
+
+        # 2. H1データの時間範囲を確認
+        h1_timestamps = {c['timestamp'] for c in h1_candles}
+        oldest_h1 = datetime.fromisoformat(h1_candles[0]['timestamp'])
+        newest_h1 = datetime.fromisoformat(h1_candles[-1]['timestamp'])
+
+        # 3. 期待されるH1タイムスタンプを計算（市場営業時間のみ）
+        expected_timestamps = set()
+        check_time = oldest_h1
+        while check_time <= current_time:
+            if is_market_open(check_time):
+                expected_timestamps.add(check_time.replace(minute=0, second=0, microsecond=0).isoformat())
+            check_time += timedelta(hours=1)
+
+        # 4. 欠損しているタイムスタンプを特定
+        missing_timestamps = expected_timestamps - h1_timestamps
+
+        # 欠損がない場合は通常の処理（最新の部分ローソク足のみ更新）
+        if not missing_timestamps:
+            # 最新のローソク足の開始時刻を計算
+            latest_candle_start = self.calculate_candle_start_time('H1', current_time)
+            latest_candle_start_iso = latest_candle_start.isoformat()
+
+            # 最新のローソク足をリストから除外
+            filtered_candles = [c for c in h1_candles if c['timestamp'] != latest_candle_start_iso]
+
+            # 最新のローソク足を10分足から動的生成
+            partial_candle = self.generate_partial_candle('H1', latest_candle_start, current_time)
+            if partial_candle:
+                filtered_candles.append(partial_candle)
+
+            return filtered_candles, False
+
+        # 5. 欠損がある場合、M10から補完データを生成
+        logger.debug(f"[H1] {len(missing_timestamps)}件の欠損を検出、M10から補完")
+
+        # 欠損期間のM10データを取得
+        missing_times = [datetime.fromisoformat(ts) for ts in missing_timestamps]
+        min_missing = min(missing_times)
+        max_missing = max(missing_times) + timedelta(hours=1)  # 1時間分のデータが必要
+
+        m10_candles = (
+            self.db.query(Candle)
+            .filter(Candle.timeframe == 'M10')
+            .filter(Candle.timestamp >= min_missing)
+            .filter(Candle.timestamp < max_missing)
+            .order_by(Candle.timestamp.asc())
+            .all()
+        )
+
+        # 市場営業時間外のデータを除外
+        m10_candles = filter_market_hours(m10_candles, 'M10')
+
+        # M10データを1時間単位でグループ化してH1を生成
+        generated_h1 = {}
+        for candle in m10_candles:
+            h1_start = candle.timestamp.replace(minute=0, second=0, microsecond=0)
+            h1_key = h1_start.isoformat()
+
+            # 欠損しているタイムスタンプのみ生成
+            if h1_key not in missing_timestamps:
+                continue
+
+            if h1_key not in generated_h1:
+                generated_h1[h1_key] = {
+                    'timestamp': h1_key,
+                    'open': float(candle.open),
+                    'high': float(candle.high),
+                    'low': float(candle.low),
+                    'close': float(candle.close),
+                    'volume': candle.volume,
+                    '_first_time': candle.timestamp,
+                    '_last_time': candle.timestamp,
+                }
+            else:
+                h1 = generated_h1[h1_key]
+                if candle.timestamp < h1['_first_time']:
+                    h1['open'] = float(candle.open)
+                    h1['_first_time'] = candle.timestamp
+                if candle.timestamp > h1['_last_time']:
+                    h1['close'] = float(candle.close)
+                    h1['_last_time'] = candle.timestamp
+                h1['high'] = max(h1['high'], float(candle.high))
+                h1['low'] = min(h1['low'], float(candle.low))
+                h1['volume'] += candle.volume
+
+        # 内部用フィールドを削除
+        for h1 in generated_h1.values():
+            del h1['_first_time']
+            del h1['_last_time']
+
+        # 6. DBデータと生成データをマージ
+        all_candles = h1_candles + list(generated_h1.values())
+
+        # タイムスタンプでソート
+        all_candles.sort(key=lambda x: x['timestamp'])
+
+        # 7. 最新のローソク足を部分データに置き換え
+        latest_candle_start = self.calculate_candle_start_time('H1', current_time)
+        latest_candle_start_iso = latest_candle_start.isoformat()
+
+        # 最新のローソク足をリストから除外
+        filtered_candles = [c for c in all_candles if c['timestamp'] != latest_candle_start_iso]
+
+        # 最新のローソク足を10分足から動的生成
+        partial_candle = self.generate_partial_candle('H1', latest_candle_start, current_time)
+        if partial_candle:
+            filtered_candles.append(partial_candle)
+
+        # limit件に制限
+        if len(filtered_candles) > limit:
+            filtered_candles = filtered_candles[-limit:]
+
+        return filtered_candles, False
+
+    def _generate_h1_from_m10(
+        self,
+        current_time: datetime,
+        limit: int = 100,
+    ) -> tuple[list[dict], bool]:
+        """
+        M10データからH1ローソク足を動的に生成する
+
+        H1データがDBに存在しない場合に使用する。
+        M10データを1時間単位で集約してH1ローソク足を生成する。
+
+        Args:
+            current_time (datetime): シミュレーション時刻
+            limit (int, optional): 取得件数上限。デフォルトは100
+
+        Returns:
+            tuple[list[dict], bool]: (ローソク足データのリスト, データ不足フラグ)
+        """
+        # M10データを取得（limit * 6 で1時間分のデータを確保）
+        # 例: 100本のH1 = 600本のM10が必要
+        m10_candles = (
+            self.db.query(Candle)
+            .filter(Candle.timeframe == 'M10')
+            .filter(Candle.timestamp <= current_time)
+            .order_by(Candle.timestamp.desc())
+            .limit(limit * 6 * 2)  # 市場時間フィルタリングを考慮して多めに取得
+            .all()
+        )
+
+        if not m10_candles:
+            return [], True
+
+        # 市場営業時間外のデータを除外
+        m10_candles = filter_market_hours(m10_candles, 'M10')
+
+        # 時系列順に並び替え
+        m10_candles.reverse()
+
+        # M10データを1時間単位でグループ化してH1を生成
+        h1_candles = {}
+        for candle in m10_candles:
+            # 1時間足の開始時刻を計算（分を0に）
+            h1_start = candle.timestamp.replace(minute=0, second=0, microsecond=0)
+            h1_key = h1_start.isoformat()
+
+            if h1_key not in h1_candles:
+                h1_candles[h1_key] = {
+                    'timestamp': h1_key,
+                    'open': float(candle.open),
+                    'high': float(candle.high),
+                    'low': float(candle.low),
+                    'close': float(candle.close),
+                    'volume': candle.volume,
+                    '_first_time': candle.timestamp,
+                    '_last_time': candle.timestamp,
+                }
+            else:
+                h1 = h1_candles[h1_key]
+                # 最初のM10データでopenを設定
+                if candle.timestamp < h1['_first_time']:
+                    h1['open'] = float(candle.open)
+                    h1['_first_time'] = candle.timestamp
+                # 最後のM10データでcloseを設定
+                if candle.timestamp > h1['_last_time']:
+                    h1['close'] = float(candle.close)
+                    h1['_last_time'] = candle.timestamp
+                # high/lowを更新
+                h1['high'] = max(h1['high'], float(candle.high))
+                h1['low'] = min(h1['low'], float(candle.low))
+                h1['volume'] += candle.volume
+
+        # 内部用フィールドを削除してリストに変換
+        result = []
+        for h1 in h1_candles.values():
+            del h1['_first_time']
+            del h1['_last_time']
+            result.append(h1)
+
+        # タイムスタンプでソート
+        result.sort(key=lambda x: x['timestamp'])
+
+        # 最新のローソク足（現在の時間帯）は部分的なデータ
+        # 現在の時間帯の開始時刻を計算
+        current_h1_start = current_time.replace(minute=0, second=0, microsecond=0)
+        current_h1_key = current_h1_start.isoformat()
+
+        # 現在の時間帯を除外（部分データとして再生成するため）
+        result = [c for c in result if c['timestamp'] != current_h1_key]
+
+        # 現在の時間帯の部分ローソク足を生成
+        partial_candle = self.generate_partial_candle('H1', current_h1_start, current_time)
+        if partial_candle:
+            result.append(partial_candle)
+
+        # limit件に制限
+        if len(result) > limit:
+            result = result[-limit:]
+
+        return result, False
