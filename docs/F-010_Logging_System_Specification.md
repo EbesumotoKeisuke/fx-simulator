@@ -238,10 +238,10 @@ logger.info('OrderPanel', '注文パネルを開きました')
 logger.warning('ChartPanel', 'データ読み込みに時間がかかっています')
 
 // エラーログ（統一フォーマット）
-logger.error('API', '【startSimulation error : シミュレーション開始に失敗しました', { error })
+logger.error('API', 'startSimulation error : シミュレーション開始に失敗しました', { error })
 
 // 重大エラーログ（統一フォーマット）
-logger.critical('App', '【componentDidCatch error : アプリケーションエラーが発生しました', { error })
+logger.critical('App', 'componentDidCatch error : アプリケーションエラーが発生しました', { error })
 ```
 
 ### 5.4 コンソール出力フォーマット
@@ -256,7 +256,7 @@ logger.critical('App', '【componentDidCatch error : アプリケーションエ
 エラーログは以下の統一フォーマットで出力すること：
 
 ```typescript
-logger.error('ソース名', '【関数名 error : {エラー内容}', { error })
+logger.error('ソース名', '関数名 error : {エラー内容}', { error })
 ```
 
 **例:**
@@ -265,7 +265,7 @@ const handleSubmit = async () => {
   try {
     // 処理
   } catch (error) {
-    logger.error('OrderPanel', '【handleSubmit error : 注文の送信に失敗しました', { error })
+    logger.error('OrderPanel', 'handleSubmit error : 注文の送信に失敗しました', { error })
     throw error
   }
 }
