@@ -100,6 +100,8 @@ export interface Candle {
   close: number
   /** 出来高 */
   volume: number
+  /** 20期間EMA（計算できない場合はnull） */
+  ema20: number | null
 }
 
 export interface CandlesResponse {

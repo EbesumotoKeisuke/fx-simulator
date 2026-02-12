@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
-import { createChart, IChartApi, ISeriesApi, CandlestickData, Time, MouseEventParams } from 'lightweight-charts'
+import { createChart, IChartApi, ISeriesApi, CandlestickData, LineData, Time, MouseEventParams } from 'lightweight-charts'
 import { marketDataApi, Candle, ordersApi, tradesApi } from '../services/api'
 import { logger } from '../utils/logger'
 
@@ -91,6 +91,7 @@ function ChartPanel({
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
+  const emaSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   // クロスヘアに表示するOHLCデータ
   const [ohlcData, setOhlcData] = useState<OhlcDisplay | null>(null)
   // ローソク足データを保持（クロスヘア表示用）
@@ -215,6 +216,23 @@ function ChartPanel({
   }
 
   /**
+   * EMAデータをチャート用にフォーマットする
+   * ema20がnullでないデータのみを含める
+   */
+  const formatEmaData = (candles: Candle[]): LineData[] => {
+    return candles
+      .filter((c) => c.ema20 !== null)
+      .map((c) => {
+        const date = new Date(c.timestamp)
+        const fakeUtcTimestamp = convertToFakeUtcTimestamp(date)
+        return {
+          time: fakeUtcTimestamp as Time,
+          value: c.ema20 as number,
+        }
+      })
+  }
+
+  /**
    * ローカル時間をISO形式に変換（UTCに変換しない）
    */
   const toLocalISOString = (date: Date): string => {
@@ -303,6 +321,11 @@ function ChartPanel({
 
         if (formattedData.length > 0) {
           seriesRef.current.setData(formattedData)
+          // 20EMAデータを設定
+          if (emaSeriesRef.current) {
+            const emaData = formatEmaData(response.data.candles)
+            emaSeriesRef.current.setData(emaData)
+          }
           // クロスヘア用にデータをMapに保存
           candleDataRef.current.clear()
           formattedData.forEach((candle) => {
@@ -569,8 +592,18 @@ function ChartPanel({
       wickUpColor: '#26a69a',
     })
 
+    // 20EMAラインシリーズを追加
+    const emaSeries = chart.addLineSeries({
+      color: '#f0b90b',  // ゴールド/イエロー
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    })
+
     chartRef.current = chart
     seriesRef.current = candlestickSeries
+    emaSeriesRef.current = emaSeries
 
     // チャート作成後、初期データを取得
     fetchData()
@@ -817,10 +850,43 @@ function ChartPanel({
     }
   }
 
+  /**
+   * チャートデータを強制的に再読み込みする
+   * リロードボタン押下時に呼ばれる
+   */
+  const handleReload = useCallback(async () => {
+    // 取得中フラグをリセット（強制リロードのため）
+    isFetchingRef.current = false
+    // 最終更新時刻をリセット（throttle無効化）
+    lastUpdateTimeRef.current = null
+    // データ不足通知フラグをリセット
+    dataMissingNotifiedRef.current = false
+
+    logger.info('ChartPanel', `[${timeframe}] Manual reload triggered`)
+
+    // データを再取得
+    await fetchData()
+
+    // 10分足の場合はマーカーも更新
+    if (timeframe === 'M10') {
+      await updateMarkers()
+    }
+  }, [fetchData, timeframe, updateMarkers])
+
   return (
     <div className="bg-bg-card rounded-lg overflow-hidden flex flex-col">
       <div className="px-3 py-1.5 text-base font-semibold text-text-strong border-b border-border flex justify-between items-center">
-        <span>{title}</span>
+        <div className="flex items-center gap-2">
+          <span>{title}</span>
+          <button
+            onClick={handleReload}
+            className="text-sm text-text-secondary hover:text-text-strong px-1.5 py-0.5 rounded hover:bg-bg-hover transition-colors"
+            title="チャートデータをリロード"
+            data-testid="reload-button"
+          >
+            ↻
+          </button>
+        </div>
         {/* クロスヘアホバー時のOHLC表示 */}
         {ohlcData && (
           <div className="flex items-center gap-2 text-base font-normal">

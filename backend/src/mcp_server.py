@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-FX Simulator MCP Server
+MCP FXシミュレーション分析サーバー（シミュレーションデータ）
+Claude Desktop向けFastMCPサーバー（11ツール）
 
-Claude Desktop と連携するための Model Context Protocol サーバー。
-トレード結果を分析し、Claude がAIフィードバックを生成するためのツールを提供します。
+ツール名は sim_ プレフィックス付き。
+stock-monitoring-system の actual_ プレフィックスツールと区別するため。
+- sim_*    : シミュレーションデータ（SQLiteデータベースベース）
+- actual_* : 実際の売買履歴データ（stock-monitoring-system側で提供）
 """
 
 from fastmcp import FastMCP
@@ -28,16 +31,9 @@ def get_db() -> Session:
 
 
 @mcp.tool()
-def get_trading_performance() -> Dict[str, Any]:
-    """
-    Get comprehensive trading performance metrics.
-
-    Returns detailed statistics including:
-    - Win rate, profit factor
-    - Total P&L, max drawdown
-    - Risk/reward ratios
-    - Consecutive wins/losses
-    - Average profit/loss per trade
+def sim_get_trading_performance() -> Dict[str, Any]:
+    """【シミュレーション】シミュレーション環境の総合パフォーマンス指標を取得する。
+    勝率・PF・最大DD・RR比等を返す。
 
     Returns:
         dict: パフォーマンス指標の辞書
@@ -59,18 +55,11 @@ def get_trading_performance() -> Dict[str, Any]:
 
 
 @mcp.tool()
-def get_recent_trades(limit: int = 10) -> List[Dict[str, Any]]:
-    """
-    Get recent trade history.
+def sim_get_recent_trades(limit: int = 10) -> List[Dict[str, Any]]:
+    """【シミュレーション】シミュレーション環境の最近のトレード履歴を取得する。
 
     Args:
-        limit: Number of recent trades to retrieve (default: 10, max: 100)
-
-    Returns list of trades with:
-    - Entry/exit prices and times
-    - P&L in pips and JPY
-    - Side (buy/sell)
-    - Lot size
+        limit: 取得件数（デフォルト10、最大100）
 
     Returns:
         list: 最近のトレード履歴のリスト
@@ -91,16 +80,9 @@ def get_recent_trades(limit: int = 10) -> List[Dict[str, Any]]:
 
 
 @mcp.tool()
-def get_losing_trades_analysis() -> Dict[str, Any]:
-    """
-    Analyze losing trades to identify patterns.
-
-    Returns:
-    - List of all losing trades
-    - Common characteristics
-    - Time-of-day patterns (if applicable)
-    - Average loss size
-    - Total number of losing trades
+def sim_get_losing_trades_analysis() -> Dict[str, Any]:
+    """【シミュレーション】シミュレーション環境の負けトレードパターンを分析する。
+    時間帯別分布・平均損失額・最大損失額を返す。
 
     Returns:
         dict: 損失トレードの分析結果
@@ -163,16 +145,9 @@ def get_losing_trades_analysis() -> Dict[str, Any]:
 
 
 @mcp.tool()
-def get_winning_trades_analysis() -> Dict[str, Any]:
-    """
-    Analyze winning trades to identify success patterns.
-
-    Returns:
-    - List of all winning trades
-    - Common characteristics
-    - Best performing timeframes
-    - Average profit size
-    - Total number of winning trades
+def sim_get_winning_trades_analysis() -> Dict[str, Any]:
+    """【シミュレーション】シミュレーション環境の勝ちトレード成功パターンを分析する。
+    時間帯別分布・平均利益額・最大利益額を返す。
 
     Returns:
         dict: 勝ちトレードの分析結果
@@ -235,16 +210,9 @@ def get_winning_trades_analysis() -> Dict[str, Any]:
 
 
 @mcp.tool()
-def get_drawdown_data() -> Dict[str, Any]:
-    """
-    Get drawdown history and statistics.
-
-    Returns:
-    - Current drawdown
-    - Maximum drawdown
-    - Maximum drawdown percentage
-    - Drawdown duration
-    - Recovery information
+def sim_get_drawdown_data() -> Dict[str, Any]:
+    """【シミュレーション】シミュレーション環境のドローダウン統計を取得する。
+    現在DD・最大DD・DD推移を返す。
 
     Returns:
         dict: ドローダウンデータ
@@ -266,21 +234,11 @@ def get_drawdown_data() -> Dict[str, Any]:
 
 
 @mcp.tool()
-def get_equity_curve(interval: str = "trade") -> Dict[str, Any]:
-    """
-    Get equity curve data showing account balance over time.
+def sim_get_equity_curve(interval: str = "trade") -> Dict[str, Any]:
+    """【シミュレーション】シミュレーション環境の資産推移（エクイティカーブ）を取得する。
 
     Args:
-        interval: Granularity of data points ('trade', 'hour', 'day')
-                  - 'trade': Every trade (default)
-                  - 'hour': Hourly snapshots
-                  - 'day': Daily snapshots
-
-    Returns:
-    - List of timestamps and equity values
-    - Starting equity
-    - Current equity
-    - Peak equity
+        interval: データ粒度（'trade', 'hour', 'day'）
 
     Returns:
         dict: 資産曲線データ
@@ -306,22 +264,9 @@ def get_equity_curve(interval: str = "trade") -> Dict[str, Any]:
 
 
 @mcp.tool()
-def get_trade_analysis_summary() -> Dict[str, Any]:
-    """
-    Get comprehensive trade analysis summary with improvement suggestions.
-
-    Analyzes trading patterns and provides actionable improvement suggestions.
-
-    Returns:
-    - Hourly performance analysis (winrate by hour)
-    - Best and worst trading hours
-    - Maximum consecutive losses pattern
-    - Specific improvement suggestions based on data
-
-    This tool is particularly useful for identifying:
-    - Time periods to avoid trading
-    - Emotional trading patterns
-    - Risk/reward imbalances
+def sim_get_trade_analysis_summary() -> Dict[str, Any]:
+    """【シミュレーション】シミュレーション環境の総合分析サマリーと改善提案を生成する。
+    時間帯別勝率・連敗パターン・改善アクションを返す。
 
     Returns:
         dict: 分析サマリーと改善提案
@@ -343,15 +288,9 @@ def get_trade_analysis_summary() -> Dict[str, Any]:
 
 
 @mcp.tool()
-def get_current_alerts() -> Dict[str, Any]:
-    """
-    Get current trading alerts and warnings.
-
-    Checks for various risk conditions including:
-    - Consecutive losses (3+ losses in a row)
-    - Daily loss exceeding 5% of initial balance
-    - Drawdown exceeding 10%
-    - Low winrate time periods
+def sim_get_current_alerts() -> Dict[str, Any]:
+    """【シミュレーション】シミュレーション環境の現在のアラート・警告を取得する。
+    連敗・日次損失超過・DD超過等のリスク状態をチェックする。
 
     Returns:
         dict: 現在のアラート一覧
@@ -372,31 +311,22 @@ def get_current_alerts() -> Dict[str, Any]:
 
 
 @mcp.tool()
-def get_chart_data(
+def sim_get_chart_data(
     timeframe: str,
     limit: int = 100,
     start_time: Optional[str] = None,
     end_time: Optional[str] = None
 ) -> Dict[str, Any]:
-    """
-    Get candlestick (OHLCV) chart data for analysis.
-
-    Retrieves historical price data for the specified timeframe.
-    Useful for analyzing trading patterns, market conditions, and price movements.
+    """【シミュレーション】シミュレーション環境のOHLCチャートデータを取得する。
 
     Args:
-        timeframe: Time period for candles - 'W1' (weekly), 'D1' (daily), 'H1' (hourly), 'M10' (10-minute)
-        limit: Maximum number of candles to retrieve (default: 100, max: 1000)
-        start_time: Optional start date in ISO format (e.g., '2024-12-01T00:00:00')
-        end_time: Optional end date in ISO format (e.g., '2024-12-31T23:59:59')
+        timeframe: タイムフレーム（'W1', 'D1', 'H1', 'M10'）
+        limit: 取得件数（デフォルト100、最大1000）
+        start_time: 開始日時（ISO形式、例: '2024-12-01T00:00:00'）
+        end_time: 終了日時（ISO形式、例: '2024-12-31T23:59:59'）
 
     Returns:
-        dict: Chart data with candles list
-            Each candle contains: timestamp, open, high, low, close, volume
-
-    Examples:
-        - Get latest 100 daily candles: get_chart_data('D1', 100)
-        - Get hourly data for December: get_chart_data('H1', 1000, '2024-12-01T00:00:00', '2024-12-31T23:59:59')
+        dict: チャートデータ
     """
     # Validate timeframe
     if timeframe not in ["W1", "D1", "H1", "M10"]:
@@ -441,15 +371,11 @@ def get_chart_data(
 
 
 @mcp.tool()
-def get_available_timeframes() -> Dict[str, Any]:
-    """
-    Get list of available chart timeframes.
-
-    Returns all supported timeframes with their descriptions.
-    Use this to understand which timeframes are available for analysis.
+def sim_get_available_timeframes() -> Dict[str, Any]:
+    """【シミュレーション】シミュレーション環境で利用可能なタイムフレーム一覧を取得する。
 
     Returns:
-        dict: Available timeframes with descriptions
+        dict: 利用可能なタイムフレーム一覧
     """
     return {
         "timeframes": [
@@ -479,17 +405,11 @@ def get_available_timeframes() -> Dict[str, Any]:
 
 
 @mcp.tool()
-def get_data_date_range() -> Dict[str, Any]:
-    """
-    Get the date range of available chart data.
-
-    Returns the start and end dates for all timeframes.
-    Use this to understand what historical data is available for analysis.
+def sim_get_data_date_range() -> Dict[str, Any]:
+    """【シミュレーション】シミュレーション環境のデータ期間（開始日〜終了日）を取得する。
 
     Returns:
-        dict: Date range information for each timeframe
-            - overall start_date and end_date
-            - per-timeframe start, end, and record count
+        dict: 各タイムフレームの日付範囲情報
     """
     db = get_db()
     try:

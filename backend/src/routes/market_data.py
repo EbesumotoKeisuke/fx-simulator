@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 
 from src.utils.database import get_db
-from src.services.market_data_service import MarketDataService
+from src.services.market_data_service import MarketDataService, add_ema_to_candles
 from src.services.csv_import_service import CSVImportService
 from src.utils.logger import get_logger
 
@@ -28,6 +28,9 @@ async def get_candles(
 
         service = MarketDataService(db)
         candles = service.get_candles(timeframe, start_time, end_time, limit)
+
+        # 20EMAを計算して追加
+        candles = add_ema_to_candles(candles, period=20)
 
         return {
             "success": True,
@@ -57,6 +60,9 @@ async def get_candles_before(
 
         service = MarketDataService(db)
         candles = service.get_candles_before(timeframe, before_time, limit)
+
+        # 20EMAを計算して追加
+        candles = add_ema_to_candles(candles, period=20)
 
         return {
             "success": True,
@@ -99,6 +105,9 @@ async def get_candles_partial(
 
         service = MarketDataService(db)
         candles, data_missing = service.get_candles_with_partial_last(timeframe, current_time, limit)
+
+        # 20EMAを計算して追加
+        candles = add_ema_to_candles(candles, period=20)
 
         return {
             "success": True,
