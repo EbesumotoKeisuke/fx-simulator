@@ -145,52 +145,68 @@ export const useSimulationStore = create<SimulationState & SimulationActions>((s
   },
 
   stopSimulation: async () => {
-    set({ isLoading: true, error: null })
+    // 楽観的更新: 即座にstatusを'stopped'に設定してUIを即座に反応させる
+    const previousStatus = get().status
+    set({ status: 'stopped', isLoading: true, error: null })
     logger.info('SimulationStore', 'シミュレーション停止')
     try {
       const res = await simulationApi.stop()
       if (res.success && res.data) {
         logger.info('SimulationStore', 'シミュレーション停止成功')
-        set({
-          status: 'stopped',
-          isLoading: false,
-        })
+        set({ isLoading: false })
       } else {
+        // API失敗時は元の状態に戻す
         const errorMsg = res.error?.message || 'Failed to stop simulation'
         logger.error('SimulationStore', `stopSimulation error : ${errorMsg}`)
-        set({ error: errorMsg, isLoading: false })
+        set({ status: previousStatus, error: errorMsg, isLoading: false })
       }
     } catch (error) {
+      // エラー時は元の状態に戻す
       logger.error('SimulationStore', `stopSimulation error : ${error}`, { error })
-      set({ error: String(error), isLoading: false })
+      set({ status: previousStatus, error: String(error), isLoading: false })
     }
   },
 
   pauseSimulation: async () => {
-    set({ isLoading: true, error: null })
+    // 楽観的更新: 即座にstatusを'paused'に設定してUIを即座に反応させる
+    // これによりタイマーが即座に停止し、チャート更新も停止する
+    const previousStatus = get().status
+    set({ status: 'paused', isLoading: true, error: null })
     try {
       const res = await simulationApi.pause()
       if (res.success && res.data) {
-        set({ status: 'paused', isLoading: false })
+        // API成功時はisLoadingをfalseに
+        set({ isLoading: false })
       } else {
-        set({ error: res.error?.message || 'Failed to pause simulation', isLoading: false })
+        // API失敗時は元の状態に戻す
+        logger.error('SimulationStore', `pauseSimulation error : ${res.error?.message || 'Failed to pause simulation'}`)
+        set({ status: previousStatus, error: res.error?.message || 'Failed to pause simulation', isLoading: false })
       }
     } catch (error) {
-      set({ error: String(error), isLoading: false })
+      // エラー時は元の状態に戻す
+      logger.error('SimulationStore', `pauseSimulation error : ${error}`, { error })
+      set({ status: previousStatus, error: String(error), isLoading: false })
     }
   },
 
   resumeSimulation: async () => {
-    set({ isLoading: true, error: null })
+    // 楽観的更新: 即座にstatusを'running'に設定してUIを即座に反応させる
+    const previousStatus = get().status
+    set({ status: 'running', isLoading: true, error: null })
     try {
       const res = await simulationApi.resume()
       if (res.success && res.data) {
-        set({ status: 'running', isLoading: false })
+        // API成功時はisLoadingをfalseに
+        set({ isLoading: false })
       } else {
-        set({ error: res.error?.message || 'Failed to resume simulation', isLoading: false })
+        // API失敗時は元の状態に戻す
+        logger.error('SimulationStore', `resumeSimulation error : ${res.error?.message || 'Failed to resume simulation'}`)
+        set({ status: previousStatus, error: res.error?.message || 'Failed to resume simulation', isLoading: false })
       }
     } catch (error) {
-      set({ error: String(error), isLoading: false })
+      // エラー時は元の状態に戻す
+      logger.error('SimulationStore', `resumeSimulation error : ${error}`, { error })
+      set({ status: previousStatus, error: String(error), isLoading: false })
     }
   },
 
