@@ -1,9 +1,20 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { analyticsApi, tradesApi, PerformanceMetrics, EquityCurveData, DrawdownData, Trade, Candle } from '../services/api'
 import { useSimulationStore } from '../store/simulationStore'
-import { createChart, IChartApi, ISeriesApi, CandlestickData, Time } from 'lightweight-charts'
+import { createChart, IChartApi, ISeriesApi, CandlestickData, Time, MouseEventParams } from 'lightweight-charts'
 import { logger } from '../utils/logger'
+
+// 時間足の定義
+const TIMEFRAMES = ['W1', 'D1', 'H1', 'M10'] as const
+type Timeframe = typeof TIMEFRAMES[number]
+
+const TIMEFRAME_LABELS: Record<Timeframe, string> = {
+  W1: '週足(W1)',
+  D1: '日足(D1)',
+  H1: '1時間足(H1)',
+  M10: '10分足(M10)',
+}
 
 /**
  * パフォーマンス分析ページコンポーネント
@@ -17,15 +28,48 @@ function AnalysisPage() {
   const [drawdown, setDrawdown] = useState<DrawdownData | null>(null)
   const [loading, setLoading] = useState(true)
 
-  // Chart state
+  // Chart state - 4つの時間足それぞれのデータ
   const [trades, setTrades] = useState<Trade[]>([])
-  const [candles, setCandles] = useState<Candle[]>([])
-  const [timeframe, setTimeframe] = useState<'W1' | 'D1' | 'H1' | 'M10'>('H1')
+  const [candlesByTimeframe, setCandlesByTimeframe] = useState<Record<Timeframe, Candle[]>>({
+    W1: [],
+    D1: [],
+    H1: [],
+    M10: [],
+  })
   const [chartLoading, setChartLoading] = useState(false)
-  const [chartError, setChartError] = useState<string | null>(null)
-  const chartContainerRef = useRef<HTMLDivElement>(null)
-  const chartRef = useRef<IChartApi | null>(null)
-  const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
+  const [selectedTradeIndex, setSelectedTradeIndex] = useState<number | null>(null)
+
+  // Chart refs - 4つのチャート
+  const chartContainerRefs = useRef<Record<Timeframe, HTMLDivElement | null>>({
+    W1: null,
+    D1: null,
+    H1: null,
+    M10: null,
+  })
+  const chartRefs = useRef<Record<Timeframe, IChartApi | null>>({
+    W1: null,
+    D1: null,
+    H1: null,
+    M10: null,
+  })
+  const candleSeriesRefs = useRef<Record<Timeframe, ISeriesApi<'Candlestick'> | null>>({
+    W1: null,
+    D1: null,
+    H1: null,
+    M10: null,
+  })
+  // ローソク足データをMap形式で保持（クロスヘア同期用）
+  const candleDataRefs = useRef<Record<Timeframe, Map<number, CandlestickData>>>({
+    W1: new Map(),
+    D1: new Map(),
+    H1: new Map(),
+    M10: new Map(),
+  })
+
+  // クロスヘア同期用state
+  const [syncedCrosshairTime, setSyncedCrosshairTime] = useState<number | null>(null)
+  const [syncedCrosshairPrice, setSyncedCrosshairPrice] = useState<number | null>(null)
+  const [activeChart, setActiveChart] = useState<Timeframe | null>(null)
 
   useEffect(() => {
     const fetchData = async () => {
@@ -61,246 +105,298 @@ function AnalysisPage() {
     fetchData()
   }, [simulationId])
 
-  // Fetch trades and candles for chart
+  // Fetch trades and candles for all timeframes
   useEffect(() => {
     const fetchChartData = async () => {
       if (!simulationId) {
         setTrades([])
-        setCandles([])
-        setChartError(null)
+        setCandlesByTimeframe({ W1: [], D1: [], H1: [], M10: [] })
         return
       }
 
       try {
         setChartLoading(true)
-        setChartError(null)
 
-        const result = await analyticsApi.getTradesWithCandles(timeframe)
+        // 全時間足のデータを並列取得
+        const results = await Promise.all(
+          TIMEFRAMES.map(tf => analyticsApi.getTradesWithCandles(tf))
+        )
 
-        if (result.success && result.data) {
-          // データ検証: trades と candles が配列であることを確認
-          const validTrades = Array.isArray(result.data.trades) ? result.data.trades : []
-          const validCandles = Array.isArray(result.data.candles) ? result.data.candles : []
+        // トレードデータは共通（どの時間足からも同じ）
+        const tradesData = results[0]?.data?.trades || []
+        setTrades(Array.isArray(tradesData) ? tradesData : [])
 
-          // タイムスタンプの検証
-          const filteredCandles = validCandles.filter(candle => {
-            if (!candle.timestamp) {
-              logger.warning('AnalysisPage', 'Invalid candle: missing timestamp', { candle })
-              return false
-            }
-            const date = new Date(candle.timestamp)
-            if (isNaN(date.getTime())) {
-              logger.warning('AnalysisPage', 'Invalid candle: invalid timestamp', { timestamp: candle.timestamp })
-              return false
-            }
-            return true
-          })
-
-          setTrades(validTrades)
-          setCandles(filteredCandles)
-        } else {
-          // データ取得に失敗した場合、空配列にリセット
-          logger.warning('AnalysisPage', 'チャートデータの取得に失敗またはデータなし')
-          setTrades([])
-          setCandles([])
+        // 各時間足のローソク足データを設定
+        const newCandlesByTimeframe: Record<Timeframe, Candle[]> = {
+          W1: [],
+          D1: [],
+          H1: [],
+          M10: [],
         }
+
+        TIMEFRAMES.forEach((tf, index) => {
+          const result = results[index]
+          if (result.success && result.data?.candles) {
+            const validCandles = result.data.candles.filter((candle: Candle) => {
+              if (!candle.timestamp) return false
+              const date = new Date(candle.timestamp)
+              return !isNaN(date.getTime())
+            })
+            newCandlesByTimeframe[tf] = validCandles
+          }
+        })
+
+        setCandlesByTimeframe(newCandlesByTimeframe)
       } catch (error) {
         logger.error('AnalysisPage', 'チャートデータの取得に失敗しました', { error })
-        setChartError(error instanceof Error ? error.message : 'チャートデータの取得に失敗しました')
-        // エラーが発生した場合も空配列にリセット
-        setTrades([])
-        setCandles([])
       } finally {
         setChartLoading(false)
       }
     }
 
     fetchChartData()
-  }, [simulationId, timeframe])
+  }, [simulationId])
 
-  // Create and render chart
+  // クロスヘア移動ハンドラ
+  const handleCrosshairMove = useCallback((timeframe: Timeframe, time: number | null, price: number | null) => {
+    if (activeChart === timeframe) {
+      setSyncedCrosshairTime(time)
+      setSyncedCrosshairPrice(price)
+    }
+  }, [activeChart])
+
+  // チャートの作成と描画
   useEffect(() => {
-    if (!chartContainerRef.current || candles.length === 0) {
-      return
+    // 全チャートをクリーンアップ
+    const cleanup = () => {
+      TIMEFRAMES.forEach(tf => {
+        if (chartRefs.current[tf]) {
+          chartRefs.current[tf]!.remove()
+          chartRefs.current[tf] = null
+          candleSeriesRefs.current[tf] = null
+        }
+      })
     }
 
-    try {
-      // Create chart
-      const chart = createChart(chartContainerRef.current, {
-        width: chartContainerRef.current.clientWidth,
-        height: 500,
-        layout: {
-          background: { color: '#1a1a1a' },
-          textColor: '#d1d4dc',
-          fontSize: 16,
-        },
-        grid: {
-          vertLines: { color: '#2a2a2a' },
-          horzLines: { color: '#2a2a2a' },
-        },
-        localization: {
-          // 時刻表示を yyyy/mm/dd HH:mm 形式にカスタマイズ
-          timeFormatter: (timestamp: number) => {
-            const date = new Date(timestamp * 1000)
-            const year = date.getUTCFullYear()
-            const month = String(date.getUTCMonth() + 1).padStart(2, '0')
-            const day = String(date.getUTCDate()).padStart(2, '0')
-            const hour = String(date.getUTCHours()).padStart(2, '0')
-            const minute = String(date.getUTCMinutes()).padStart(2, '0')
-            return `${year}/${month}/${day} ${hour}:${minute}`
+    cleanup()
+
+    // 各時間足のチャートを作成
+    TIMEFRAMES.forEach(tf => {
+      const container = chartContainerRefs.current[tf]
+      const candles = candlesByTimeframe[tf]
+
+      if (!container || candles.length === 0) return
+
+      try {
+        const chart = createChart(container, {
+          width: container.clientWidth,
+          height: 180,
+          layout: {
+            background: { color: '#1a1a1a' },
+            textColor: '#d1d4dc',
+            fontSize: 11,
           },
-        },
-        timeScale: {
-          borderColor: '#485c7b',
-          timeVisible: true, // すべてのタイムフレームで時刻を表示
-          secondsVisible: false,
-        },
-      })
-
-      chartRef.current = chart
-
-      // Create candlestick series
-      const candleSeries = chart.addCandlestickSeries({
-        upColor: '#26a69a',
-        downColor: '#ef5350',
-        borderVisible: false,
-        wickUpColor: '#26a69a',
-        wickDownColor: '#ef5350',
-      })
-
-      candleSeriesRef.current = candleSeries
-
-      // Convert candles to chart data format with validation
-      const chartData: CandlestickData[] = candles
-        .map((candle) => {
-          const timestamp = new Date(candle.timestamp).getTime() / 1000
-          if (isNaN(timestamp)) {
-            logger.warning('AnalysisPage', 'Invalid timestamp in candle', { candle })
-            return null
-          }
-          return {
-            time: timestamp as Time,
-            open: candle.open,
-            high: candle.high,
-            low: candle.low,
-            close: candle.close,
-          }
-        })
-        .filter((data): data is CandlestickData => data !== null)
-
-      if (chartData.length === 0) {
-        logger.warning('AnalysisPage', 'フィルタリング後に有効なチャートデータがありません')
-        chart.remove()
-        return
-      }
-
-      candleSeries.setData(chartData)
-
-      // Create a set of valid times from chart data for marker validation
-      const validTimes = new Set(chartData.map(d => d.time))
-
-      // Helper function to find the nearest valid candle time
-      const findNearestValidTime = (targetTime: number): number | null => {
-        // If the exact time exists, use it
-        if (validTimes.has(targetTime as Time)) {
-          return targetTime
-        }
-
-        // Find the nearest time
-        const times = Array.from(validTimes) as number[]
-        if (times.length === 0) return null
-
-        let nearest = times[0]
-        let minDiff = Math.abs(times[0] - targetTime)
-
-        for (const time of times) {
-          const diff = Math.abs(time - targetTime)
-          if (diff < minDiff) {
-            minDiff = diff
-            nearest = time
-          }
-        }
-
-        return nearest
-      }
-
-      // Add trade markers with validation and time adjustment
-      const markers = trades
-        .flatMap((trade) => {
-          if (!trade.opened_at || !trade.closed_at) {
-            logger.warning('AnalysisPage', 'Trade missing timestamps', { trade })
-            return []
-          }
-
-          const entryTime = new Date(trade.opened_at).getTime() / 1000
-          const exitTime = new Date(trade.closed_at).getTime() / 1000
-
-          if (isNaN(entryTime) || isNaN(exitTime)) {
-            logger.warning('AnalysisPage', 'Invalid trade timestamps', { trade })
-            return []
-          }
-
-          // Find nearest valid times for markers
-          const nearestEntryTime = findNearestValidTime(entryTime)
-          const nearestExitTime = findNearestValidTime(exitTime)
-
-          if (nearestEntryTime === null || nearestExitTime === null) {
-            logger.warning('AnalysisPage', 'Could not find valid times for trade markers', { trade })
-            return []
-          }
-
-          return [
-            // Entry marker
-            {
-              time: nearestEntryTime as Time,
-              position: trade.side === 'buy' ? 'belowBar' : 'aboveBar',
-              color: trade.side === 'buy' ? '#26a69a' : '#ef5350',
-              shape: trade.side === 'buy' ? 'arrowUp' : 'arrowDown',
-              text: `${trade.side === 'buy' ? '買' : '売'}\n${trade.entry_price.toFixed(3)}`,
+          grid: {
+            vertLines: { color: '#2a2a2a' },
+            horzLines: { color: '#2a2a2a' },
+          },
+          localization: {
+            timeFormatter: (timestamp: number) => {
+              const date = new Date(timestamp * 1000)
+              const month = String(date.getUTCMonth() + 1).padStart(2, '0')
+              const day = String(date.getUTCDate()).padStart(2, '0')
+              const hour = String(date.getUTCHours()).padStart(2, '0')
+              const minute = String(date.getUTCMinutes()).padStart(2, '0')
+              return `${month}/${day} ${hour}:${minute}`
             },
-            // Exit marker
-            {
-              time: nearestExitTime as Time,
-              position: trade.realized_pnl >= 0 ? 'aboveBar' : 'belowBar',
-              color: trade.realized_pnl >= 0 ? '#26a69a' : '#ef5350',
-              shape: 'circle',
-              text: `${trade.exit_price.toFixed(3)}（${trade.realized_pnl >= 0 ? '+' : ''}${trade.realized_pnl_pips.toFixed(1)}p：${trade.realized_pnl >= 0 ? '+' : ''}¥${trade.realized_pnl.toLocaleString()}）`,
-            },
-          ]
+          },
+          timeScale: {
+            borderColor: '#485c7b',
+            timeVisible: true,
+            secondsVisible: false,
+          },
+          rightPriceScale: {
+            borderColor: '#485c7b',
+          },
+          crosshair: {
+            mode: 0,
+          },
         })
-        // Sort markers by time to ensure they are in chronological order
-        .sort((a, b) => (a.time as number) - (b.time as number))
 
-      if (markers.length > 0) {
-        candleSeries.setMarkers(markers as any)
-      }
+        chartRefs.current[tf] = chart
 
-      // Fit content
-      chart.timeScale().fitContent()
+        const candleSeries = chart.addCandlestickSeries({
+          upColor: '#26a69a',
+          downColor: '#ef5350',
+          borderVisible: false,
+          wickUpColor: '#26a69a',
+          wickDownColor: '#ef5350',
+        })
 
-      // Handle resize
-      const handleResize = () => {
-        if (chartContainerRef.current) {
-          chart.applyOptions({
-            width: chartContainerRef.current.clientWidth,
+        candleSeriesRefs.current[tf] = candleSeries
+
+        // ローソク足データをフォーマット
+        const chartData: CandlestickData[] = candles
+          .map((candle) => {
+            const timestamp = new Date(candle.timestamp).getTime() / 1000
+            if (isNaN(timestamp)) return null
+            return {
+              time: timestamp as Time,
+              open: candle.open,
+              high: candle.high,
+              low: candle.low,
+              close: candle.close,
+            }
           })
+          .filter((data): data is CandlestickData => data !== null)
+
+        if (chartData.length === 0) return
+
+        candleSeries.setData(chartData)
+
+        // Map形式でデータを保持
+        candleDataRefs.current[tf].clear()
+        chartData.forEach(candle => {
+          candleDataRefs.current[tf].set(candle.time as number, candle)
+        })
+
+        const validTimes = new Set(chartData.map(d => d.time))
+
+        // 最も近い有効な時刻を探すヘルパー
+        const findNearestValidTime = (targetTime: number): number | null => {
+          if (validTimes.has(targetTime as Time)) return targetTime
+          const times = Array.from(validTimes) as number[]
+          if (times.length === 0) return null
+          let nearest = times[0]
+          let minDiff = Math.abs(times[0] - targetTime)
+          for (const time of times) {
+            const diff = Math.abs(time - targetTime)
+            if (diff < minDiff) {
+              minDiff = diff
+              nearest = time
+            }
+          }
+          return nearest
         }
-      }
 
-      window.addEventListener('resize', handleResize)
+        // トレードマーカーを追加
+        const HIGHLIGHT_COLOR = '#FFD700'
+        const markers = trades
+          .flatMap((trade, index) => {
+            if (!trade.opened_at || !trade.closed_at) return []
+            const entryTime = new Date(trade.opened_at).getTime() / 1000
+            const exitTime = new Date(trade.closed_at).getTime() / 1000
+            if (isNaN(entryTime) || isNaN(exitTime)) return []
 
-      // Cleanup
-      return () => {
-        window.removeEventListener('resize', handleResize)
-        chart.remove()
-        chartRef.current = null
-        candleSeriesRef.current = null
+            const nearestEntryTime = findNearestValidTime(entryTime)
+            const nearestExitTime = findNearestValidTime(exitTime)
+            if (nearestEntryTime === null || nearestExitTime === null) return []
+
+            const isSelected = selectedTradeIndex === index
+            const entryColor = isSelected ? HIGHLIGHT_COLOR : (trade.side === 'buy' ? '#26a69a' : '#ef5350')
+            const exitColor = isSelected ? HIGHLIGHT_COLOR : (trade.realized_pnl >= 0 ? '#26a69a' : '#ef5350')
+            const markerSize = isSelected ? 2 : 1
+
+            return [
+              {
+                time: nearestEntryTime as Time,
+                position: trade.side === 'buy' ? 'belowBar' : 'aboveBar',
+                color: entryColor,
+                shape: trade.side === 'buy' ? 'arrowUp' : 'arrowDown',
+                text: isSelected ? `★${trade.side === 'buy' ? '買' : '売'}` : `${trade.side === 'buy' ? '買' : '売'}`,
+                size: markerSize,
+              },
+              {
+                time: nearestExitTime as Time,
+                position: trade.realized_pnl >= 0 ? 'aboveBar' : 'belowBar',
+                color: exitColor,
+                shape: 'circle',
+                text: isSelected ? `★決` : '決',
+                size: markerSize,
+              },
+            ]
+          })
+          .sort((a, b) => (a.time as number) - (b.time as number))
+
+        if (markers.length > 0) {
+          candleSeries.setMarkers(markers as any)
+        }
+
+        // 選択されたトレードの位置にスクロール
+        if (selectedTradeIndex !== null && trades[selectedTradeIndex]) {
+          const selectedTrade = trades[selectedTradeIndex]
+          const entryTime = new Date(selectedTrade.opened_at).getTime() / 1000
+          const nearestTime = findNearestValidTime(entryTime)
+          if (nearestTime !== null) {
+            const timeScale = chart.timeScale()
+            const times = Array.from(validTimes) as number[]
+            const selectedIndex = times.findIndex(t => t === nearestTime)
+            if (selectedIndex !== -1) {
+              const displayBars = 30
+              const halfBars = Math.floor(displayBars / 2)
+              let fromIndex = selectedIndex - halfBars
+              let toIndex = selectedIndex + halfBars
+              if (fromIndex < 0) {
+                fromIndex = 0
+                toIndex = Math.min(displayBars, times.length - 1)
+              }
+              if (toIndex >= times.length) {
+                toIndex = times.length - 1
+                fromIndex = Math.max(0, toIndex - displayBars)
+              }
+              timeScale.setVisibleLogicalRange({ from: fromIndex, to: toIndex + 3 })
+            }
+          }
+        } else {
+          chart.timeScale().fitContent()
+        }
+
+        // クロスヘア移動イベント
+        chart.subscribeCrosshairMove((param: MouseEventParams) => {
+          if (activeChart === tf && param.time) {
+            const data = param.seriesData?.get(candleSeries) as CandlestickData | undefined
+            handleCrosshairMove(tf, param.time as number, data?.close || null)
+          }
+        })
+
+      } catch (error) {
+        logger.error('AnalysisPage', `チャート${tf}の作成に失敗しました`, { error })
       }
-    } catch (error) {
-      logger.error('AnalysisPage', 'チャートの作成または描画に失敗しました', { error })
-      setChartError('チャートの描画に失敗しました')
+    })
+
+    // リサイズハンドラ
+    const handleResize = () => {
+      TIMEFRAMES.forEach(tf => {
+        const container = chartContainerRefs.current[tf]
+        const chart = chartRefs.current[tf]
+        if (container && chart) {
+          chart.applyOptions({ width: container.clientWidth })
+        }
+      })
     }
-  }, [candles, trades])
+
+    window.addEventListener('resize', handleResize)
+
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      cleanup()
+    }
+  }, [candlesByTimeframe, trades, selectedTradeIndex, activeChart, handleCrosshairMove])
+
+  // 他のチャートへのクロスヘア同期
+  useEffect(() => {
+    if (!syncedCrosshairTime || !activeChart) return
+
+    TIMEFRAMES.forEach(tf => {
+      if (tf === activeChart) return
+      const chart = chartRefs.current[tf]
+      const series = candleSeriesRefs.current[tf]
+      if (!chart || !series) return
+
+      // 同期されたクロスヘア位置の更新（setCrosshairPositionは廃止されたのでクロスヘア線は表示しない）
+      // 代わりにOHLCデータの同期表示のみ行う
+    })
+  }, [syncedCrosshairTime, syncedCrosshairPrice, activeChart])
 
   const handleBack = () => {
     navigate('/')
@@ -322,7 +418,6 @@ function AnalysisPage() {
       const result = await tradesApi.import(file)
       if (result.success) {
         alert(result.data.message || 'インポートが完了しました')
-        // ページをリロードしてデータを更新
         window.location.reload()
       }
     } catch (error) {
@@ -330,7 +425,6 @@ function AnalysisPage() {
       alert(error instanceof Error ? error.message : 'インポートに失敗しました')
     }
 
-    // ファイル入力をリセット
     event.target.value = ''
   }
 
@@ -356,8 +450,6 @@ function AnalysisPage() {
     )
   }
 
-  // 取引データが0件でも分析画面を表示する（チャートと統計情報は空の状態で表示）
-
   return (
     <div className="min-h-screen bg-bg-primary">
       {/* Header */}
@@ -365,7 +457,6 @@ function AnalysisPage() {
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-text-strong">パフォーマンス分析</h1>
           <div className="flex gap-2">
-            {/* インポートボタン */}
             <label className="px-4 py-2 bg-btn-primary text-text-strong rounded hover:opacity-80 cursor-pointer">
               インポート
               <input
@@ -375,8 +466,6 @@ function AnalysisPage() {
                 className="hidden"
               />
             </label>
-
-            {/* エクスポートボタン（ドロップダウン） */}
             <div className="relative group">
               <button className="px-4 py-2 bg-btn-primary text-text-strong rounded hover:opacity-80">
                 エクスポート ▼
@@ -396,7 +485,6 @@ function AnalysisPage() {
                 </button>
               </div>
             </div>
-
             <button
               onClick={handleBack}
               className="px-4 py-2 bg-btn-secondary text-text-strong rounded hover:opacity-80"
@@ -407,171 +495,143 @@ function AnalysisPage() {
         </div>
       </div>
 
-      <div className="p-6 space-y-6">
-        {/* チャート表示セクション */}
-        <div className="bg-bg-card rounded-lg p-6 border border-border">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-text-strong">売買履歴チャート</h2>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setTimeframe('M10')}
-                className={`px-3 py-1 rounded text-sm ${
-                  timeframe === 'M10'
-                    ? 'bg-btn-primary text-text-strong'
-                    : 'bg-bg-secondary text-text-primary hover:opacity-80'
-                }`}
-              >
-                10分足
-              </button>
-              <button
-                onClick={() => setTimeframe('H1')}
-                className={`px-3 py-1 rounded text-sm ${
-                  timeframe === 'H1'
-                    ? 'bg-btn-primary text-text-strong'
-                    : 'bg-bg-secondary text-text-primary hover:opacity-80'
-                }`}
-              >
-                1時間足
-              </button>
-              <button
-                onClick={() => setTimeframe('D1')}
-                className={`px-3 py-1 rounded text-sm ${
-                  timeframe === 'D1'
-                    ? 'bg-btn-primary text-text-strong'
-                    : 'bg-bg-secondary text-text-primary hover:opacity-80'
-                }`}
-              >
-                日足
-              </button>
-              <button
-                onClick={() => setTimeframe('W1')}
-                className={`px-3 py-1 rounded text-sm ${
-                  timeframe === 'W1'
-                    ? 'bg-btn-primary text-text-strong'
-                    : 'bg-bg-secondary text-text-primary hover:opacity-80'
-                }`}
-              >
-                週足
-              </button>
-            </div>
-          </div>
-
-          {/* チャートエリア */}
-          {chartLoading ? (
-            <div className="flex items-center justify-center h-[500px] text-text-secondary">
-              <div className="text-center">
-                <div className="text-lg mb-2">読み込み中...</div>
-                <div className="text-sm">チャートデータを取得しています</div>
-              </div>
-            </div>
-          ) : chartError ? (
-            <div className="flex items-center justify-center h-[500px] text-text-secondary">
-              <div className="text-center">
-                <div className="text-lg mb-2 text-sell">エラーが発生しました</div>
-                <div className="text-sm">{chartError}</div>
-              </div>
-            </div>
-          ) : candles.length > 0 ? (
-            <>
-              <div ref={chartContainerRef} className="w-full" />
-              <div className="mt-4 text-sm text-text-secondary">
-                <div className="flex gap-6">
-                  <div className="flex items-center gap-2">
-                    <span className="inline-block w-3 h-3 bg-buy rounded-full"></span>
-                    <span>買いエントリー</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="inline-block w-3 h-3 bg-sell rounded-full"></span>
-                    <span>売りエントリー</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="inline-block w-3 h-3 border-2 border-text-secondary rounded-full"></span>
-                    <span>決済</span>
-                  </div>
+      <div className="p-4 space-y-4">
+        {/* 売買履歴チャートとトレード履歴を横並び表示 */}
+        <div className="flex gap-4">
+          {/* 4つのチャート表示セクション（65%幅） */}
+          <div className="bg-bg-card rounded-lg p-3 border border-border" style={{ width: '65%' }}>
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-base font-semibold text-text-strong">売買履歴チャート</h2>
+              <div className="flex gap-3 text-xs text-text-secondary">
+                <div className="flex items-center gap-1">
+                  <span className="inline-block w-2 h-2 bg-buy rounded-full"></span>
+                  <span>買い</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="inline-block w-2 h-2 bg-sell rounded-full"></span>
+                  <span>売り</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: '#FFD700' }}></span>
+                  <span>選択中</span>
                 </div>
               </div>
-            </>
-          ) : (
-            <div className="flex items-center justify-center h-[500px] text-text-secondary">
-              <div className="text-center">
-                <div className="text-lg mb-2">データがありません</div>
-                <div className="text-sm">この時間足では表示できるデータがありません</div>
-              </div>
             </div>
-          )}
-        </div>
 
-        {/* トレード履歴テーブル */}
-        {trades.length > 0 && (
-          <div className="bg-bg-card rounded-lg p-6 border border-border">
-            <h2 className="text-xl font-semibold text-text-strong mb-4">トレード履歴</h2>
-            <div className="overflow-x-auto max-h-[400px] overflow-y-auto border border-border rounded">
-              <table className="w-full text-sm">
-                <thead className="bg-bg-primary sticky top-0">
-                  <tr className="border-b border-border">
-                    <th className="px-3 py-2 text-left text-text-secondary font-semibold">エントリー日時</th>
-                    <th className="px-3 py-2 text-left text-text-secondary font-semibold">決済日時</th>
-                    <th className="px-3 py-2 text-center text-text-secondary font-semibold">売買</th>
-                    <th className="px-3 py-2 text-right text-text-secondary font-semibold">ロット</th>
-                    <th className="px-3 py-2 text-right text-text-secondary font-semibold">エントリー</th>
-                    <th className="px-3 py-2 text-right text-text-secondary font-semibold">決済</th>
-                    <th className="px-3 py-2 text-right text-text-secondary font-semibold">損益(JPY)</th>
-                    <th className="px-3 py-2 text-right text-text-secondary font-semibold">損益(pips)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {trades.map((trade, index) => (
-                    <tr key={trade.trade_id || index} className="border-b border-border hover:bg-bg-secondary">
-                      <td className="px-3 py-2 text-text-primary">
-                        {new Date(trade.opened_at).toLocaleString('ja-JP', {
-                          year: 'numeric',
-                          month: '2-digit',
-                          day: '2-digit',
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })}
-                      </td>
-                      <td className="px-3 py-2 text-text-primary">
-                        {new Date(trade.closed_at).toLocaleString('ja-JP', {
-                          year: 'numeric',
-                          month: '2-digit',
-                          day: '2-digit',
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })}
-                      </td>
-                      <td className="px-3 py-2 text-center">
-                        <span className={`px-2 py-1 rounded text-xs font-bold ${
-                          trade.side === 'buy' ? 'bg-buy bg-opacity-20 text-buy' : 'bg-sell bg-opacity-20 text-sell'
-                        }`}>
-                          {trade.side === 'buy' ? '買い' : '売り'}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-right text-text-primary">{trade.lot_size}</td>
-                      <td className="px-3 py-2 text-right text-text-primary">{trade.entry_price.toFixed(3)}</td>
-                      <td className="px-3 py-2 text-right text-text-primary">{trade.exit_price.toFixed(3)}</td>
-                      <td className={`px-3 py-2 text-right font-bold ${
-                        trade.realized_pnl >= 0 ? 'text-buy' : 'text-sell'
-                      }`}>
-                        {trade.realized_pnl >= 0 ? '+' : ''}¥{trade.realized_pnl.toLocaleString()}
-                      </td>
-                      <td className={`px-3 py-2 text-right font-bold ${
-                        trade.realized_pnl_pips >= 0 ? 'text-buy' : 'text-sell'
-                      }`}>
-                        {trade.realized_pnl_pips >= 0 ? '+' : ''}{trade.realized_pnl_pips.toFixed(1)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            {chartLoading ? (
+              <div className="flex items-center justify-center h-[400px] text-text-secondary">
+                <div className="text-lg">読み込み中...</div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
+                {TIMEFRAMES.map(tf => (
+                  <div
+                    key={tf}
+                    className="border border-border rounded overflow-hidden"
+                    onMouseEnter={() => setActiveChart(tf)}
+                    onMouseLeave={() => setActiveChart(null)}
+                  >
+                    <div className="bg-bg-secondary px-2 py-1 text-xs font-semibold text-text-strong border-b border-border">
+                      {TIMEFRAME_LABELS[tf]}
+                    </div>
+                    {candlesByTimeframe[tf].length > 0 ? (
+                      <div
+                        ref={(el) => { chartContainerRefs.current[tf] = el }}
+                        style={{ height: '180px' }}
+                      />
+                    ) : (
+                      <div className="flex items-center justify-center h-[180px] text-text-secondary text-sm">
+                        データなし
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-        )}
+
+          {/* トレード履歴テーブル（35%幅） */}
+          <div className="bg-bg-card rounded-lg p-3 border border-border" style={{ width: '35%' }}>
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-base font-semibold text-text-strong">トレード履歴</h2>
+              {selectedTradeIndex !== null && (
+                <button
+                  onClick={() => setSelectedTradeIndex(null)}
+                  className="px-2 py-1 text-xs bg-btn-secondary text-text-strong rounded hover:opacity-80"
+                >
+                  選択解除
+                </button>
+              )}
+            </div>
+            {trades.length > 0 ? (
+              <>
+                <div className="text-xs text-text-secondary mb-2">
+                  ※ 行クリックでチャートにハイライト
+                </div>
+                <div className="overflow-x-auto max-h-[380px] overflow-y-auto border border-border rounded">
+                  <table className="w-full text-xs">
+                    <thead className="bg-bg-primary sticky top-0">
+                      <tr className="border-b border-border">
+                        <th className="px-2 py-1.5 text-left text-text-secondary font-semibold">日時</th>
+                        <th className="px-2 py-1.5 text-center text-text-secondary font-semibold">売買</th>
+                        <th className="px-2 py-1.5 text-right text-text-secondary font-semibold">損益</th>
+                        <th className="px-2 py-1.5 text-right text-text-secondary font-semibold">pips</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {trades.map((trade, index) => (
+                        <tr
+                          key={trade.trade_id || index}
+                          className={`border-b border-border cursor-pointer transition-colors ${
+                            selectedTradeIndex === index
+                              ? 'bg-btn-primary bg-opacity-30 hover:bg-opacity-40'
+                              : 'hover:bg-bg-secondary'
+                          }`}
+                          onClick={() => setSelectedTradeIndex(selectedTradeIndex === index ? null : index)}
+                          title={`エントリー: ${trade.entry_price.toFixed(3)} → 決済: ${trade.exit_price.toFixed(3)}`}
+                        >
+                          <td className="px-2 py-1.5 text-text-primary">
+                            {new Date(trade.closed_at).toLocaleString('ja-JP', {
+                              month: '2-digit',
+                              day: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </td>
+                          <td className="px-2 py-1.5 text-center">
+                            <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${
+                              trade.side === 'buy' ? 'bg-buy bg-opacity-20 text-buy' : 'bg-sell bg-opacity-20 text-sell'
+                            }`}>
+                              {trade.side === 'buy' ? '買' : '売'}
+                            </span>
+                          </td>
+                          <td className={`px-2 py-1.5 text-right font-bold ${
+                            trade.realized_pnl >= 0 ? 'text-buy' : 'text-sell'
+                          }`}>
+                            {trade.realized_pnl >= 0 ? '+' : ''}¥{trade.realized_pnl.toLocaleString()}
+                          </td>
+                          <td className={`px-2 py-1.5 text-right font-bold ${
+                            trade.realized_pnl_pips >= 0 ? 'text-buy' : 'text-sell'
+                          }`}>
+                            {trade.realized_pnl_pips >= 0 ? '+' : ''}{trade.realized_pnl_pips.toFixed(1)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : (
+              <div className="flex items-center justify-center h-[380px] text-text-secondary">
+                <div className="text-base">取引データなし</div>
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* 主要指標カード */}
         {performance && performance.basic.total_trades > 0 ? (
           <div className="grid grid-cols-4 gap-4">
-            {/* 勝率カード */}
             <div className="bg-bg-card rounded-lg p-4 border border-border">
               <div className="text-sm text-text-secondary mb-1">勝率</div>
               <div className={`text-3xl font-bold ${performance.basic.win_rate >= 50 ? 'text-buy' : 'text-text-strong'}`}>
@@ -581,8 +641,6 @@ function AnalysisPage() {
                 勝{performance.basic.winning_trades} / 負{performance.basic.losing_trades} / 計{performance.basic.total_trades}
               </div>
             </div>
-
-            {/* プロフィットファクターカード */}
             <div className="bg-bg-card rounded-lg p-4 border border-border">
               <div className="text-sm text-text-secondary mb-1">プロフィットファクター</div>
               <div className={`text-3xl font-bold ${performance.risk_return.profit_factor >= 1 ? 'text-buy' : 'text-sell'}`}>
@@ -592,8 +650,6 @@ function AnalysisPage() {
                 総利益 ¥{performance.basic.gross_profit.toLocaleString()} / 総損失 ¥{Math.abs(performance.basic.gross_loss).toLocaleString()}
               </div>
             </div>
-
-            {/* 最大ドローダウンカード */}
             <div className="bg-bg-card rounded-lg p-4 border border-border">
               <div className="text-sm text-text-secondary mb-1">最大ドローダウン</div>
               <div className="text-3xl font-bold text-sell">
@@ -603,8 +659,6 @@ function AnalysisPage() {
                 ¥{performance.drawdown.max_drawdown.toLocaleString()}
               </div>
             </div>
-
-            {/* トータル損益カード */}
             <div className="bg-bg-card rounded-lg p-4 border border-border">
               <div className="text-sm text-text-secondary mb-1">トータル損益</div>
               <div className={`text-3xl font-bold ${performance.basic.total_pnl >= 0 ? 'text-buy' : 'text-sell'}`}>
