@@ -17,6 +17,7 @@ class Account(Base):
     equity = Column(DECIMAL(15, 2), nullable=False)
     realized_pnl = Column(DECIMAL(15, 2), nullable=False, default=0)
     consecutive_losses = Column(Integer, nullable=False, default=0)
+    consecutive_wins = Column(Integer, nullable=False, default=0)
     updated_at = Column(TIMESTAMP, nullable=False, server_default=func.now(), onupdate=func.now())
 
     simulation = relationship("Simulation", backref="account")

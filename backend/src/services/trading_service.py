@@ -583,6 +583,15 @@ class TradingService:
             account.consecutive_losses = 0
         # 0 <= pnl_pips < 30 の場合は何もしない（維持）
 
+        # 連勝カウント更新（分析画面と同じ基準: realized_pnl > 0 で勝ち）
+        if realized_pnl > 0:
+            account.consecutive_wins += 1
+        elif realized_pnl < 0:
+            account.consecutive_wins = 0
+        else:
+            # 損益ゼロの場合はリセット
+            account.consecutive_wins = 0
+
         self.db.commit()
 
         logger.info(f"ポジションを決済しました: position_id={position.id}, pnl={realized_pnl:.2f}円 ({pnl_pips:.1f}pips)")
@@ -626,6 +635,7 @@ class TradingService:
                 "margin_used": 0,
                 "margin_available": 0,
                 "consecutive_losses": 0,
+                "consecutive_wins": 0,
             }
 
         account = self._get_account(simulation.id)
@@ -639,6 +649,7 @@ class TradingService:
                 "margin_used": 0,
                 "margin_available": 0,
                 "consecutive_losses": 0,
+                "consecutive_wins": 0,
             }
 
         # 含み損益を計算
@@ -680,6 +691,7 @@ class TradingService:
             "margin_used": round(margin_used, 2),
             "margin_available": round(margin_available, 2),
             "consecutive_losses": account.consecutive_losses,
+            "consecutive_wins": account.consecutive_wins,
         }
 
     def get_trades(self, limit: int = 50, offset: int = 0) -> dict:
@@ -1291,3 +1303,11 @@ class TradingService:
             elif pnl_pips >= 30:
                 account.consecutive_losses = 0
             # 0 <= pnl_pips < 30 の場合は何もしない（維持）
+
+            # 連勝カウント更新（分析画面と同じ基準: realized_pnl > 0 で勝ち）
+            if realized_pnl > 0:
+                account.consecutive_wins += 1
+            elif realized_pnl < 0:
+                account.consecutive_wins = 0
+            else:
+                account.consecutive_wins = 0

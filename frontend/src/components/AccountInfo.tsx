@@ -13,7 +13,7 @@ import { accountApi, analyticsApi, AccountInfo as AccountInfoType, PerformanceMe
 import { useSimulationStore } from '../store/simulationStore'
 import { formatCurrency, formatPercent } from '../utils/formatters'
 import { calculateProfitLossPercent } from '../utils/calculations'
-import { cn, getPnLClass, getConsecutiveLossStyle } from '../utils/classNames'
+import { cn, getPnLClass, getConsecutiveLossStyle, getConsecutiveWinStyle } from '../utils/classNames'
 import { logger } from '../utils/logger'
 import '../styles/components/AccountInfo.css'
 
@@ -90,8 +90,9 @@ function AccountInfo({ refreshTrigger }: AccountInfoProps) {
   const profitLoss = account.equity - account.initial_balance
   const profitLossPercent = calculateProfitLossPercent(profitLoss, account.initial_balance)
 
-  // 連敗表示スタイルを取得
+  // 連敗・連勝表示スタイルを取得
   const consecutiveLossStyle = getConsecutiveLossStyle(account.consecutive_losses ?? 0)
+  const consecutiveWinStyle = getConsecutiveWinStyle(account.consecutive_wins ?? 0)
 
   return (
     <div className="account-info">
@@ -147,6 +148,17 @@ function AccountInfo({ refreshTrigger }: AccountInfoProps) {
               </span>
             </span>
           </div>
+          {account.consecutive_wins !== undefined && (
+            <span
+              className={cn(
+                'account-info__consecutive-losses',
+                consecutiveWinStyle.bg,
+                consecutiveWinStyle.text
+              )}
+            >
+              連勝: {account.consecutive_wins}回 {consecutiveWinStyle.icon}
+            </span>
+          )}
           {account.consecutive_losses !== undefined && (
             <span
               className={cn(

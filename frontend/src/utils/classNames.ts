@@ -87,6 +87,37 @@ export function getConsecutiveLossStyle(consecutiveLosses: number): {
 }
 
 /**
+ * 連勝数に基づいてスタイルクラスを取得
+ * @param consecutiveWins - 連勝数
+ * @returns スタイルオブジェクト { bg, text, icon }
+ */
+export function getConsecutiveWinStyle(consecutiveWins: number): {
+  bg: string
+  text: string
+  icon: string
+} {
+  if (consecutiveWins === 0) {
+    return {
+      bg: 'bg-bg-primary',
+      text: 'text-text-secondary',
+      icon: '-',
+    }
+  } else if (consecutiveWins <= 2) {
+    return {
+      bg: 'bg-buy/20',
+      text: 'text-buy',
+      icon: '▲',
+    }
+  } else {
+    return {
+      bg: 'bg-buy/30',
+      text: 'text-buy',
+      icon: '🔥',
+    }
+  }
+}
+
+/**
  * ボタンスタイルのクラス名を取得
  * @param variant - ボタンの種類 ('primary' | 'secondary' | 'danger' | 'success')
  * @param size - ボタンのサイズ ('sm' | 'md' | 'lg')

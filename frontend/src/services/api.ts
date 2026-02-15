@@ -722,6 +722,8 @@ export interface AccountInfo {
   initial_balance: number
   /** 連敗数 */
   consecutive_losses?: number
+  /** 連勝数 */
+  consecutive_wins?: number
 }
 
 export const accountApi = {

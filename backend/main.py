@@ -27,6 +27,13 @@ def run_migrations():
                 ))
                 conn.commit()
                 print("Migration: Added consecutive_losses column to accounts table")
+        if 'consecutive_wins' not in columns:
+            with engine.connect() as conn:
+                conn.execute(text(
+                    "ALTER TABLE accounts ADD COLUMN consecutive_wins INTEGER NOT NULL DEFAULT 0"
+                ))
+                conn.commit()
+                print("Migration: Added consecutive_wins column to accounts table")
 
 
 @asynccontextmanager
