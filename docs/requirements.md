@@ -782,6 +782,12 @@ FX Trade Simulator（FXトレードシミュレーター）
    - 売買履歴の開始時刻〜終了時刻を自動的に表示
    - ユーザーが時間範囲を変更可能
 
+4. **最低ローソク足表示本数の保証**:
+   - 売買履歴が少ない場合でも、チャートとして機能するよう最低80本のローソク足を表示
+   - 各時間足（週足・日足・1時間足・10分足）それぞれで最低80本を保証
+   - 売買履歴の時間範囲内のローソク足数が80本未満の場合、範囲を過去方向に拡張して取得
+   - これにより、上位時間足でも十分なローソク足が表示され、テクニカル分析が可能になる
+
 #### 実装方針
 
 **バックエンド実装**:
@@ -792,10 +798,12 @@ FX Trade Simulator（FXトレードシミュレーター）
    async def get_trades_with_candles(
        simulation_id: int,
        timeframe: str = Query('H1', description="時間足"),
+       min_candles: int = Query(80, description="最低ローソク足本数"),
        db: Session = Depends(get_db)
    ):
        """
        売買履歴とローソク足データを一緒に取得する
+       min_candles: 最低限表示するローソク足の本数（デフォルト80本）
        """
        # 売買履歴を取得
        trades = get_trades(simulation_id, db)
@@ -804,8 +812,10 @@ FX Trade Simulator（FXトレードシミュレーター）
        start_time = min(t.entry_time for t in trades)
        end_time = max(t.exit_time for t in trades if t.exit_time)
 
-       # ローソク足データを取得
-       candles = get_candles(timeframe, start_time, end_time, limit=10000)
+       # ローソク足データを取得（最低本数を保証）
+       candles = get_candles_with_minimum(
+           timeframe, start_time, end_time, min_candles=min_candles, limit=10000
+       )
 
        return {
            'trades': trades,

@@ -114,6 +114,7 @@ async def get_ai_feedback(
 @router.get("/trades-with-candles")
 async def get_trades_with_candles(
     timeframe: Literal["W1", "D1", "H1", "M10"] = Query("H1", description="時間足"),
+    min_candles: int = Query(80, ge=1, le=1000, description="最低ローソク足本数"),
     db: Session = Depends(get_db),
 ):
     """
@@ -123,8 +124,12 @@ async def get_trades_with_candles(
     売買履歴の時間範囲に対応するローソク足データを取得し、
     チャート上に売買履歴をマーカーとして表示するために使用する。
 
+    売買履歴が少ない場合でもチャートとして機能するよう、
+    min_candlesで指定した本数以上のローソク足を返す。
+
     Args:
         timeframe: 時間足（W1, D1, H1, M10）
+        min_candles: 最低ローソク足本数（デフォルト80）
         db: データベースセッション
 
     Returns:
@@ -138,7 +143,7 @@ async def get_trades_with_candles(
     """
     try:
         from src.services.trading_service import TradingService
-        from src.services.market_data_service import MarketDataService
+        from src.services.market_data_service import MarketDataService, add_ema_to_candles
         from datetime import datetime
 
         trading_service = TradingService(db)
@@ -179,13 +184,17 @@ async def get_trades_with_candles(
         start_time = min(opened_times)
         end_time = max(closed_times)
 
-        # ローソク足データを取得（時間範囲を指定）
-        candles = market_service.get_candles(
+        # ローソク足データを取得（最低本数を保証）
+        candles = market_service.get_candles_with_minimum(
             timeframe=timeframe,
             start_time=start_time,
             end_time=end_time,
+            min_candles=min_candles,
             limit=10000
         )
+
+        # EMAを追加
+        candles = add_ema_to_candles(candles, period=20)
 
         return {
             "success": True,

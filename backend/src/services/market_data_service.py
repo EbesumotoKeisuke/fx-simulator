@@ -261,6 +261,55 @@ class MarketDataService:
             for c in candles
         ]
 
+    def get_candles_with_minimum(
+        self,
+        timeframe: str,
+        start_time: datetime,
+        end_time: datetime,
+        min_candles: int = 80,
+        limit: int = 10000,
+    ) -> list[dict]:
+        """
+        最低本数を保証してローソク足データを取得する（パフォーマンス分析用）
+
+        売買履歴の時間範囲内のローソク足が少ない場合でも、
+        チャートとして機能するよう最低min_candles本のローソク足を返す。
+        不足分は過去方向に範囲を拡張して取得する。
+
+        Args:
+            timeframe (str): 時間足（'W1', 'D1', 'H1', 'M10'）
+            start_time (datetime): 売買履歴の開始時刻
+            end_time (datetime): 売買履歴の終了時刻
+            min_candles (int, optional): 最低ローソク足本数。デフォルトは80
+            limit (int, optional): 取得件数上限。デフォルトは10000
+
+        Returns:
+            list[dict]: ローソク足データのリスト（時系列順）
+                最低min_candles本、または利用可能な全データ（少ない場合）
+        """
+        # まず指定された時間範囲内のローソク足を取得
+        candles_in_range = self.get_candles(
+            timeframe=timeframe,
+            start_time=start_time,
+            end_time=end_time,
+            limit=limit
+        )
+
+        # min_candles以上あればそのまま返す
+        if len(candles_in_range) >= min_candles:
+            return candles_in_range
+
+        # 不足分を過去方向に拡張して取得
+        # end_time以前のデータをmin_candles本取得
+        candles = self.get_candles_before(
+            timeframe=timeframe,
+            before_time=end_time,
+            limit=min_candles
+        )
+
+        # それでも足りない場合は取得できた分だけを返す
+        return candles
+
     def get_date_range(self) -> dict:
         """
         全時間足のデータ範囲を取得する

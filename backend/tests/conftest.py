@@ -17,6 +17,7 @@ from src.utils.database import Base
 from src.models.candle import Candle
 from src.models.simulation import Simulation
 from src.models.account import Account
+from src.models.order import Order  # noqa: F401 - positions.order_id FK解決に必要
 from src.models.position import Position
 from src.models.trade import Trade
 

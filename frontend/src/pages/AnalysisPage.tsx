@@ -39,6 +39,14 @@ function AnalysisPage() {
   const [chartLoading, setChartLoading] = useState(false)
   const [selectedTradeIndex, setSelectedTradeIndex] = useState<number | null>(null)
 
+  // マーカー表示/非表示（時間足ごと）
+  const [markerVisibility, setMarkerVisibility] = useState<Record<Timeframe, boolean>>({
+    W1: true,
+    D1: true,
+    H1: true,
+    M10: true,
+  })
+
   // Chart refs - 4つのチャート
   const chartContainerRefs = useRef<Record<Timeframe, HTMLDivElement | null>>({
     W1: null,
@@ -65,6 +73,10 @@ function AnalysisPage() {
     H1: new Map(),
     M10: new Map(),
   })
+
+  // 資産曲線・ドローダウン選択
+  const [selectedEquityIndex, setSelectedEquityIndex] = useState<number | null>(null)
+  const [selectedDrawdownIndex, setSelectedDrawdownIndex] = useState<number | null>(null)
 
   // クロスヘア同期用state
   const [syncedCrosshairTime, setSyncedCrosshairTime] = useState<number | null>(null)
@@ -190,7 +202,7 @@ function AnalysisPage() {
       try {
         const chart = createChart(container, {
           width: container.clientWidth,
-          height: 180,
+          height: container.clientHeight || 180,
           layout: {
             background: { color: '#1a1a1a' },
             textColor: '#d1d4dc',
@@ -214,6 +226,7 @@ function AnalysisPage() {
             borderColor: '#485c7b',
             timeVisible: true,
             secondsVisible: false,
+            rightOffset: 5,
           },
           rightPriceScale: {
             borderColor: '#485c7b',
@@ -279,11 +292,15 @@ function AnalysisPage() {
           return nearest
         }
 
-        // トレードマーカーを追加
+        // トレードマーカーを追加（非表示設定でも選択中のトレードは表示）
         const HIGHLIGHT_COLOR = '#FFD700'
+        const isMarkersVisible = markerVisibility[tf]
         const markers = trades
           .flatMap((trade, index) => {
             if (!trade.opened_at || !trade.closed_at) return []
+            const isSelected = selectedTradeIndex === index
+            // 非表示設定の場合、選択中のトレードのみ表示
+            if (!isMarkersVisible && !isSelected) return []
             const entryTime = new Date(trade.opened_at).getTime() / 1000
             const exitTime = new Date(trade.closed_at).getTime() / 1000
             if (isNaN(entryTime) || isNaN(exitTime)) return []
@@ -291,8 +308,6 @@ function AnalysisPage() {
             const nearestEntryTime = findNearestValidTime(entryTime)
             const nearestExitTime = findNearestValidTime(exitTime)
             if (nearestEntryTime === null || nearestExitTime === null) return []
-
-            const isSelected = selectedTradeIndex === index
             const entryColor = isSelected ? HIGHLIGHT_COLOR : (trade.side === 'buy' ? '#26a69a' : '#ef5350')
             const exitColor = isSelected ? HIGHLIGHT_COLOR : (trade.realized_pnl >= 0 ? '#26a69a' : '#ef5350')
             const markerSize = isSelected ? 2 : 1
@@ -318,9 +333,7 @@ function AnalysisPage() {
           })
           .sort((a, b) => (a.time as number) - (b.time as number))
 
-        if (markers.length > 0) {
-          candleSeries.setMarkers(markers as any)
-        }
+        candleSeries.setMarkers(markers as any)
 
         // 選択されたトレードの位置にスクロール
         if (selectedTradeIndex !== null && trades[selectedTradeIndex]) {
@@ -332,7 +345,7 @@ function AnalysisPage() {
             const times = Array.from(validTimes) as number[]
             const selectedIndex = times.findIndex(t => t === nearestTime)
             if (selectedIndex !== -1) {
-              const displayBars = 30
+              const displayBars = tf === 'M10' ? 100 : 80
               const halfBars = Math.floor(displayBars / 2)
               let fromIndex = selectedIndex - halfBars
               let toIndex = selectedIndex + halfBars
@@ -370,7 +383,7 @@ function AnalysisPage() {
         const container = chartContainerRefs.current[tf]
         const chart = chartRefs.current[tf]
         if (container && chart) {
-          chart.applyOptions({ width: container.clientWidth })
+          chart.applyOptions({ width: container.clientWidth, height: container.clientHeight })
         }
       })
     }
@@ -381,7 +394,7 @@ function AnalysisPage() {
       window.removeEventListener('resize', handleResize)
       cleanup()
     }
-  }, [candlesByTimeframe, trades, selectedTradeIndex, activeChart, handleCrosshairMove])
+  }, [candlesByTimeframe, trades, selectedTradeIndex, activeChart, handleCrosshairMove, markerVisibility])
 
   // 他のチャートへのクロスヘア同期
   useEffect(() => {
@@ -497,37 +510,55 @@ function AnalysisPage() {
 
       <div className="p-4 space-y-4">
         {/* 売買履歴チャートとトレード履歴を横並び表示 */}
-        <div className="flex gap-4">
-          {/* 4つのチャート表示セクション（65%幅） */}
-          <div className="bg-bg-card rounded-lg p-3 border border-border" style={{ width: '65%' }}>
+        <div className="flex gap-4" style={{height: '85vh'}}>
+          {/* 4つのチャート表示セクション */}
+          <div className="bg-bg-card rounded-lg p-3 border border-border flex flex-col" style={{ flex: 1, minWidth: 0 }}>
             <div className="flex items-center justify-between mb-2">
               <h2 className="text-base font-semibold text-text-strong">売買履歴チャート</h2>
-              <div className="flex gap-3 text-xs text-text-secondary">
-                <div className="flex items-center gap-1">
-                  <span className="inline-block w-2 h-2 bg-buy rounded-full"></span>
-                  <span>買い</span>
+              <div className="flex items-center gap-4">
+                {/* マーカー表示設定 */}
+                <div className="flex items-center gap-2 text-xs text-text-secondary">
+                  <span>売買表示:</span>
+                  {TIMEFRAMES.map(tf => (
+                    <label key={tf} className="flex items-center gap-1 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={markerVisibility[tf]}
+                        onChange={(e) => setMarkerVisibility(prev => ({ ...prev, [tf]: e.target.checked }))}
+                        className="w-3 h-3 accent-blue-500 cursor-pointer"
+                      />
+                      <span>{TIMEFRAME_LABELS[tf].split('(')[0]}</span>
+                    </label>
+                  ))}
                 </div>
-                <div className="flex items-center gap-1">
-                  <span className="inline-block w-2 h-2 bg-sell rounded-full"></span>
-                  <span>売り</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: '#FFD700' }}></span>
-                  <span>選択中</span>
+                {/* 凡例 */}
+                <div className="flex gap-3 text-xs text-text-secondary">
+                  <div className="flex items-center gap-1">
+                    <span className="inline-block w-2 h-2 bg-buy rounded-full"></span>
+                    <span>買い</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="inline-block w-2 h-2 bg-sell rounded-full"></span>
+                    <span>売り</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: '#FFD700' }}></span>
+                    <span>選択中</span>
+                  </div>
                 </div>
               </div>
             </div>
 
             {chartLoading ? (
-              <div className="flex items-center justify-center h-[400px] text-text-secondary">
+              <div className="flex items-center justify-center flex-1 text-text-secondary">
                 <div className="text-lg">読み込み中...</div>
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-2 flex-1" style={{ gridTemplateRows: '1fr 1fr' }}>
                 {TIMEFRAMES.map(tf => (
                   <div
                     key={tf}
-                    className="border border-border rounded overflow-hidden"
+                    className="border border-border rounded overflow-hidden flex flex-col"
                     onMouseEnter={() => setActiveChart(tf)}
                     onMouseLeave={() => setActiveChart(null)}
                   >
@@ -537,10 +568,10 @@ function AnalysisPage() {
                     {candlesByTimeframe[tf].length > 0 ? (
                       <div
                         ref={(el) => { chartContainerRefs.current[tf] = el }}
-                        style={{ height: '180px' }}
+                        style={{ flex: 1 }}
                       />
                     ) : (
-                      <div className="flex items-center justify-center h-[180px] text-text-secondary text-sm">
+                      <div className="flex items-center justify-center flex-1 text-text-secondary text-sm">
                         データなし
                       </div>
                     )}
@@ -550,8 +581,8 @@ function AnalysisPage() {
             )}
           </div>
 
-          {/* トレード履歴テーブル（35%幅） */}
-          <div className="bg-bg-card rounded-lg p-3 border border-border" style={{ width: '35%' }}>
+          {/* トレード履歴テーブル */}
+          <div className="bg-bg-card rounded-lg p-3 border border-border flex flex-col" style={{ width: '23%' }}>
             <div className="flex items-center justify-between mb-2">
               <h2 className="text-base font-semibold text-text-strong">トレード履歴</h2>
               {selectedTradeIndex !== null && (
@@ -568,7 +599,7 @@ function AnalysisPage() {
                 <div className="text-xs text-text-secondary mb-2">
                   ※ 行クリックでチャートにハイライト
                 </div>
-                <div className="overflow-x-auto max-h-[380px] overflow-y-auto border border-border rounded">
+                <div className="overflow-x-auto flex-1 overflow-y-auto border border-border rounded">
                   <table className="w-full text-xs">
                     <thead className="bg-bg-primary sticky top-0">
                       <tr className="border-b border-border">
@@ -622,7 +653,7 @@ function AnalysisPage() {
                 </div>
               </>
             ) : (
-              <div className="flex items-center justify-center h-[380px] text-text-secondary">
+              <div className="flex items-center justify-center flex-1 text-text-secondary">
                 <div className="text-base">取引データなし</div>
               </div>
             )}
@@ -631,41 +662,41 @@ function AnalysisPage() {
 
         {/* 主要指標カード */}
         {performance && performance.basic.total_trades > 0 ? (
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-4 gap-4 text-base">
             <div className="bg-bg-card rounded-lg p-4 border border-border">
-              <div className="text-sm text-text-secondary mb-1">勝率</div>
-              <div className={`text-3xl font-bold ${performance.basic.win_rate >= 50 ? 'text-buy' : 'text-text-strong'}`}>
+              <div className="text-text-secondary mb-1">勝率</div>
+              <div className={`font-bold ${performance.basic.win_rate >= 50 ? 'text-buy' : 'text-text-strong'}`}>
                 {performance.basic.win_rate.toFixed(1)}%
               </div>
-              <div className="text-xs text-text-secondary mt-2">
+              <div className="text-text-secondary mt-2">
                 勝{performance.basic.winning_trades} / 負{performance.basic.losing_trades} / 計{performance.basic.total_trades}
               </div>
             </div>
             <div className="bg-bg-card rounded-lg p-4 border border-border">
-              <div className="text-sm text-text-secondary mb-1">プロフィットファクター</div>
-              <div className={`text-3xl font-bold ${performance.risk_return.profit_factor >= 1 ? 'text-buy' : 'text-sell'}`}>
+              <div className="text-text-secondary mb-1">プロフィットファクター</div>
+              <div className={`font-bold ${performance.risk_return.profit_factor >= 1 ? 'text-buy' : 'text-sell'}`}>
                 {performance.risk_return.profit_factor.toFixed(2)}
               </div>
-              <div className="text-xs text-text-secondary mt-2">
+              <div className="text-text-secondary mt-2">
                 総利益 ¥{performance.basic.gross_profit.toLocaleString()} / 総損失 ¥{Math.abs(performance.basic.gross_loss).toLocaleString()}
               </div>
             </div>
             <div className="bg-bg-card rounded-lg p-4 border border-border">
-              <div className="text-sm text-text-secondary mb-1">最大ドローダウン</div>
-              <div className="text-3xl font-bold text-sell">
+              <div className="text-text-secondary mb-1">最大ドローダウン</div>
+              <div className="font-bold text-sell">
                 {performance.drawdown.max_drawdown_percent.toFixed(2)}%
               </div>
-              <div className="text-xs text-text-secondary mt-2">
+              <div className="text-text-secondary mt-2">
                 ¥{performance.drawdown.max_drawdown.toLocaleString()}
               </div>
             </div>
             <div className="bg-bg-card rounded-lg p-4 border border-border">
-              <div className="text-sm text-text-secondary mb-1">トータル損益</div>
-              <div className={`text-3xl font-bold ${performance.basic.total_pnl >= 0 ? 'text-buy' : 'text-sell'}`}>
+              <div className="text-text-secondary mb-1">トータル損益</div>
+              <div className={`font-bold ${performance.basic.total_pnl >= 0 ? 'text-buy' : 'text-sell'}`}>
                 {performance.basic.total_pnl >= 0 ? '+' : ''}¥{performance.basic.total_pnl.toLocaleString()}
               </div>
               {equityCurve && (
-                <div className="text-xs text-text-secondary mt-2">
+                <div className="text-text-secondary mt-2">
                   開始 ¥{equityCurve.initial_balance.toLocaleString()} → 終了 ¥{equityCurve.final_balance.toLocaleString()}
                 </div>
               )}
@@ -682,164 +713,335 @@ function AnalysisPage() {
           </div>
         )}
 
-        {/* リスク・リターン指標 */}
+        {/* リスクリターン指標 / 連続記録 / シミュレーション期間：横並び */}
         {performance && performance.basic.total_trades > 0 && (
-          <div className="bg-bg-card rounded-lg p-6 border border-border">
-            <h2 className="text-xl font-semibold text-text-strong mb-4">リスク・リターン指標</h2>
-            <div className="grid grid-cols-2 gap-6">
-              <div>
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-text-primary">平均利益:</span>
-                    <span className="text-buy font-semibold">¥{performance.risk_return.average_win.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-text-primary">平均損失:</span>
-                    <span className="text-sell font-semibold">¥{performance.risk_return.average_loss.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-text-primary">リスクリワード比:</span>
-                    <span className="text-text-strong font-semibold">{performance.risk_return.risk_reward_ratio.toFixed(2)}</span>
-                  </div>
+          <div className="grid grid-cols-3 gap-4 text-base">
+            {/* リスクリターン指標 */}
+            <div className="bg-bg-card rounded-lg p-4 border border-border">
+              <h2 className="font-semibold text-text-strong mb-3">リスクリターン指標</h2>
+              <div className="grid gap-y-2" style={{ gridTemplateColumns: 'auto 1fr auto 1fr' }}>
+                <span className="text-text-primary pr-2">平均利益:</span>
+                <span className="text-buy font-semibold text-right pr-4">¥{performance.risk_return.average_win.toLocaleString()}</span>
+                <span className="text-text-primary pr-2">最大利益:</span>
+                <span className="text-buy font-semibold text-right">
+                  ¥{performance.risk_return.max_win.toLocaleString()} ({performance.risk_return.max_win_pips.toFixed(1)}pips)
+                </span>
+
+                <span className="text-text-primary pr-2">平均損失:</span>
+                <span className="text-sell font-semibold text-right pr-4">¥{performance.risk_return.average_loss.toLocaleString()}</span>
+                <span className="text-text-primary pr-2">最大損失:</span>
+                <span className="text-sell font-semibold text-right">
+                  ¥{performance.risk_return.max_loss.toLocaleString()} ({performance.risk_return.max_loss_pips.toFixed(1)}pips)
+                </span>
+
+                <span className="text-text-primary pr-2">リスクリワード比:</span>
+                <span className="text-text-strong font-semibold text-right pr-4">{performance.risk_return.risk_reward_ratio.toFixed(2)}</span>
+                <span className="text-text-primary pr-2">DD継続期間:</span>
+                <span className="text-text-strong font-semibold text-right">{performance.drawdown.max_drawdown_duration_days}日</span>
+              </div>
+            </div>
+
+            {/* 連続記録 */}
+            <div className="bg-bg-card rounded-lg p-4 border border-border">
+              <h2 className="font-semibold text-text-strong mb-3">連続記録</h2>
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-text-primary">最大連勝:</span>
+                  <span className="text-buy font-bold">{performance.consecutive.max_consecutive_wins}回</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-text-primary">最大連敗:</span>
+                  <span className="text-sell font-bold">{performance.consecutive.max_consecutive_losses}回</span>
                 </div>
               </div>
-              <div>
-                <div className="space-y-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-text-primary">最大利益:</span>
-                    <span className="text-buy font-semibold">
-                      ¥{performance.risk_return.max_win.toLocaleString()} ({performance.risk_return.max_win_pips.toFixed(1)}pips)
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-text-primary">最大損失:</span>
-                    <span className="text-sell font-semibold">
-                      ¥{performance.risk_return.max_loss.toLocaleString()} ({performance.risk_return.max_loss_pips.toFixed(1)}pips)
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-text-primary">DD継続期間:</span>
-                    <span className="text-text-strong font-semibold">{performance.drawdown.max_drawdown_duration_days}日</span>
-                  </div>
+            </div>
+
+            {/* シミュレーション期間 */}
+            <div className="bg-bg-card rounded-lg p-4 border border-border">
+              <h2 className="font-semibold text-text-strong mb-3">シミュレーション期間</h2>
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-text-primary">開始日時</span>
+                  <span className="text-text-strong font-semibold">{new Date(performance.period.start_date).toLocaleString('ja-JP')}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-text-primary">終了日時</span>
+                  <span className="text-text-strong font-semibold">{new Date(performance.period.end_date).toLocaleString('ja-JP')}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-text-primary">期間</span>
+                  <span className="text-text-strong font-bold">{performance.period.duration_days}日間</span>
                 </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* 連続記録 */}
-        {performance && performance.basic.total_trades > 0 && (
-          <div className="bg-bg-card rounded-lg p-6 border border-border">
-            <h2 className="text-xl font-semibold text-text-strong mb-4">連続記録</h2>
-            <div className="grid grid-cols-2 gap-6">
-              <div className="flex justify-between items-center">
-                <span className="text-text-primary">最大連勝:</span>
-                <span className="text-buy font-semibold text-2xl">{performance.consecutive.max_consecutive_wins}回</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-text-primary">最大連敗:</span>
-                <span className="text-sell font-semibold text-2xl">{performance.consecutive.max_consecutive_losses}回</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 期間情報 */}
-        {performance && performance.basic.total_trades > 0 && (
-          <div className="bg-bg-card rounded-lg p-6 border border-border">
-            <h2 className="text-xl font-semibold text-text-strong mb-4">シミュレーション期間</h2>
-            <div className="grid grid-cols-3 gap-6">
-              <div>
-                <div className="text-sm text-text-secondary mb-1">開始日時</div>
-                <div className="text-lg text-text-strong">{new Date(performance.period.start_date).toLocaleString('ja-JP')}</div>
-              </div>
-              <div>
-                <div className="text-sm text-text-secondary mb-1">終了日時</div>
-                <div className="text-lg text-text-strong">{new Date(performance.period.end_date).toLocaleString('ja-JP')}</div>
-              </div>
-              <div>
-                <div className="text-sm text-text-secondary mb-1">期間</div>
-                <div className="text-lg text-text-strong">{performance.period.duration_days}日間</div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 資産曲線データテーブル */}
-        {equityCurve && equityCurve.points.length > 0 && (
-          <div className="bg-bg-card rounded-lg p-6 border border-border">
-            <h2 className="text-xl font-semibold text-text-strong mb-4">資産曲線データ（最新10件）</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border">
-                    <th className="text-left py-2 text-text-secondary">日時</th>
-                    <th className="text-right py-2 text-text-secondary">残高</th>
-                    <th className="text-right py-2 text-text-secondary">有効証拠金</th>
-                    <th className="text-right py-2 text-text-secondary">累積損益</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {equityCurve.points.slice(-10).reverse().map((point, index) => (
-                    <tr key={index} className="border-b border-border">
-                      <td className="py-2 text-text-primary">
-                        {new Date(point.timestamp).toLocaleString('ja-JP', {
-                          month: '2-digit',
-                          day: '2-digit',
-                          hour: '2-digit',
-                          minute: '2-digit',
+        {/* 資産曲線 + ドローダウン：4カラム横並び */}
+        {(equityCurve && equityCurve.points.length > 0) || (drawdown && drawdown.points.length > 0) ? (
+          <div className="flex gap-2" style={{ height: '340px' }}>
+            {/* 資産曲線グラフ */}
+            {equityCurve && equityCurve.points.length > 0 && (
+              <div className="flex-1 min-w-0 bg-bg-card rounded-lg p-2 border border-border flex flex-col">
+                <div className="flex items-center justify-between mb-1">
+                  <h2 className="text-sm font-semibold text-text-strong">資産曲線グラフ</h2>
+                  {selectedEquityIndex !== null && (
+                    <button
+                      onClick={() => setSelectedEquityIndex(null)}
+                      className="px-1.5 py-0.5 text-xs bg-btn-secondary text-text-strong rounded hover:opacity-80"
+                    >
+                      選択解除
+                    </button>
+                  )}
+                </div>
+                <div className="flex-1 min-h-0 border border-border rounded overflow-hidden bg-[#1a1a1a] p-1">
+                  {(() => {
+                    const points = equityCurve.points
+                    const values = points.map(p => p.equity)
+                    const minVal = Math.min(...values)
+                    const maxVal = Math.max(...values)
+                    const range = maxVal - minVal || 1
+                    const svgW = 400
+                    const svgH = 280
+                    const pad = { top: 15, right: 55, bottom: 25, left: 8 }
+                    const w = svgW - pad.left - pad.right
+                    const h = svgH - pad.top - pad.bottom
+                    const toX = (i: number) => pad.left + (points.length > 1 ? (i / (points.length - 1)) * w : w / 2)
+                    const toY = (v: number) => pad.top + h - ((v - minVal) / range) * h
+                    const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${toX(i).toFixed(1)},${toY(p.equity).toFixed(1)}`).join(' ')
+                    const gridLines = 4
+                    return (
+                      <svg viewBox={`0 0 ${svgW} ${svgH}`} className="w-full h-full" preserveAspectRatio="none">
+                        {Array.from({ length: gridLines + 1 }, (_, i) => {
+                          const val = minVal + (range * i) / gridLines
+                          const y = toY(val)
+                          return (
+                            <g key={i}>
+                              <line x1={pad.left} y1={y} x2={svgW - pad.right} y2={y} stroke="#2a2a2a" strokeWidth="1" />
+                              <text x={svgW - pad.right + 4} y={y + 3} fill="#8a8a8a" fontSize="9" textAnchor="start">
+                                ¥{Math.round(val).toLocaleString()}
+                              </text>
+                            </g>
+                          )
                         })}
-                      </td>
-                      <td className="text-right py-2 text-text-primary">¥{point.balance.toLocaleString()}</td>
-                      <td className="text-right py-2 text-text-primary">¥{point.equity.toLocaleString()}</td>
-                      <td className={`text-right py-2 ${point.cumulative_pnl >= 0 ? 'text-buy' : 'text-sell'}`}>
-                        {point.cumulative_pnl >= 0 ? '+' : ''}¥{point.cumulative_pnl.toLocaleString()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
+                        {[0, points.length - 1].map(i => (
+                          <text key={i} x={toX(i)} y={svgH - 4} fill="#8a8a8a" fontSize="8" textAnchor="middle">
+                            {new Date(points[i].timestamp).toLocaleString('ja-JP', { month: '2-digit', day: '2-digit' })}
+                          </text>
+                        ))}
+                        <path d={pathD} fill="none" stroke="#26a69a" strokeWidth="2" />
+                        {points.map((p, i) => (
+                          <circle
+                            key={i}
+                            cx={toX(i)}
+                            cy={toY(p.equity)}
+                            r={selectedEquityIndex === i ? 6 : 3}
+                            fill={selectedEquityIndex === i ? '#FFD700' : '#26a69a'}
+                            stroke={selectedEquityIndex === i ? '#FFD700' : 'none'}
+                            strokeWidth="2"
+                            className="cursor-pointer"
+                            onClick={() => setSelectedEquityIndex(selectedEquityIndex === i ? null : i)}
+                          />
+                        ))}
+                        {selectedEquityIndex !== null && points[selectedEquityIndex] && (
+                          <text
+                            x={toX(selectedEquityIndex)}
+                            y={toY(points[selectedEquityIndex].equity) - 10}
+                            fill="#FFD700"
+                            fontSize="10"
+                            fontWeight="bold"
+                            textAnchor="middle"
+                          >
+                            ¥{points[selectedEquityIndex].equity.toLocaleString()}
+                          </text>
+                        )}
+                      </svg>
+                    )
+                  })()}
+                </div>
+              </div>
+            )}
 
-        {/* ドローダウンデータテーブル */}
-        {drawdown && drawdown.points.length > 0 && (
-          <div className="bg-bg-card rounded-lg p-6 border border-border">
-            <h2 className="text-xl font-semibold text-text-strong mb-4">ドローダウンデータ（最新10件）</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border">
-                    <th className="text-left py-2 text-text-secondary">日時</th>
-                    <th className="text-right py-2 text-text-secondary">有効証拠金</th>
-                    <th className="text-right py-2 text-text-secondary">ピーク証拠金</th>
-                    <th className="text-right py-2 text-text-secondary">DD金額</th>
-                    <th className="text-right py-2 text-text-secondary">DD率</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {drawdown.points.slice(-10).reverse().map((point, index) => (
-                    <tr key={index} className="border-b border-border">
-                      <td className="py-2 text-text-primary">
-                        {new Date(point.timestamp).toLocaleString('ja-JP', {
-                          month: '2-digit',
-                          day: '2-digit',
-                          hour: '2-digit',
-                          minute: '2-digit',
+            {/* 資産曲線データ一覧 */}
+            {equityCurve && equityCurve.points.length > 0 && (
+              <div className="flex-1 min-w-0 bg-bg-card rounded-lg p-2 border border-border flex flex-col">
+                <div className="flex items-center justify-between mb-1">
+                  <h2 className="text-sm font-semibold text-text-strong">資産曲線データ</h2>
+                  <span className="text-xs text-text-secondary">全{equityCurve.points.length}件</span>
+                </div>
+                <div className="overflow-y-auto flex-1 min-h-0 border border-border rounded">
+                  <table className="w-full text-xs">
+                    <thead className="bg-bg-primary sticky top-0">
+                      <tr className="border-b border-border">
+                        <th className="px-1.5 py-1 text-left text-text-secondary font-semibold">日時</th>
+                        <th className="px-1.5 py-1 text-right text-text-secondary font-semibold">残高</th>
+                        <th className="px-1.5 py-1 text-right text-text-secondary font-semibold">有効証拠金</th>
+                        <th className="px-1.5 py-1 text-right text-text-secondary font-semibold">累積損益</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {equityCurve.points.map((point, index) => (
+                        <tr
+                          key={index}
+                          className={`border-b border-border cursor-pointer transition-colors ${
+                            selectedEquityIndex === index
+                              ? 'bg-btn-primary bg-opacity-30 hover:bg-opacity-40'
+                              : 'hover:bg-bg-secondary'
+                          }`}
+                          onClick={() => setSelectedEquityIndex(selectedEquityIndex === index ? null : index)}
+                        >
+                          <td className="px-1.5 py-1 text-text-primary">
+                            {new Date(point.timestamp).toLocaleString('ja-JP', {
+                              month: '2-digit',
+                              day: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </td>
+                          <td className="px-1.5 py-1 text-right text-text-primary">¥{point.balance.toLocaleString()}</td>
+                          <td className="px-1.5 py-1 text-right text-text-primary">¥{point.equity.toLocaleString()}</td>
+                          <td className={`px-1.5 py-1 text-right font-bold ${point.cumulative_pnl >= 0 ? 'text-buy' : 'text-sell'}`}>
+                            {point.cumulative_pnl >= 0 ? '+' : ''}¥{point.cumulative_pnl.toLocaleString()}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* ドローダウングラフ */}
+            {drawdown && drawdown.points.length > 0 && (
+              <div className="flex-1 min-w-0 bg-bg-card rounded-lg p-2 border border-border flex flex-col">
+                <div className="flex items-center justify-between mb-1">
+                  <h2 className="text-sm font-semibold text-text-strong">ドローダウングラフ</h2>
+                  {selectedDrawdownIndex !== null && (
+                    <button
+                      onClick={() => setSelectedDrawdownIndex(null)}
+                      className="px-1.5 py-0.5 text-xs bg-btn-secondary text-text-strong rounded hover:opacity-80"
+                    >
+                      選択解除
+                    </button>
+                  )}
+                </div>
+                <div className="flex-1 min-h-0 border border-border rounded overflow-hidden bg-[#1a1a1a] p-1">
+                  {(() => {
+                    const points = drawdown.points
+                    const absValues = points.map(p => Math.abs(p.drawdown_percent))
+                    const maxVal = Math.max(...absValues, 0.01)
+                    const svgW = 400
+                    const svgH = 280
+                    const pad = { top: 15, right: 45, bottom: 25, left: 8 }
+                    const w = svgW - pad.left - pad.right
+                    const h = svgH - pad.top - pad.bottom
+                    const toX = (i: number) => pad.left + (points.length > 1 ? (i / (points.length - 1)) * w : w / 2)
+                    const toY = (v: number) => pad.top + (v / maxVal) * h
+                    const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${toX(i).toFixed(1)},${toY(Math.abs(p.drawdown_percent)).toFixed(1)}`).join(' ')
+                    const areaD = pathD + ` L${toX(points.length - 1).toFixed(1)},${pad.top} L${toX(0).toFixed(1)},${pad.top} Z`
+                    const gridLines = 4
+                    return (
+                      <svg viewBox={`0 0 ${svgW} ${svgH}`} className="w-full h-full" preserveAspectRatio="none">
+                        {Array.from({ length: gridLines + 1 }, (_, i) => {
+                          const val = (maxVal * i) / gridLines
+                          const y = toY(val)
+                          return (
+                            <g key={i}>
+                              <line x1={pad.left} y1={y} x2={svgW - pad.right} y2={y} stroke="#2a2a2a" strokeWidth="1" />
+                              <text x={svgW - pad.right + 4} y={y + 3} fill="#8a8a8a" fontSize="9" textAnchor="start">
+                                {val > 0 ? `-${val.toFixed(1)}%` : '0%'}
+                              </text>
+                            </g>
+                          )
                         })}
-                      </td>
-                      <td className="text-right py-2 text-text-primary">¥{point.equity.toLocaleString()}</td>
-                      <td className="text-right py-2 text-text-primary">¥{point.peak_equity.toLocaleString()}</td>
-                      <td className="text-right py-2 text-sell">¥{point.drawdown.toLocaleString()}</td>
-                      <td className="text-right py-2 text-sell">{point.drawdown_percent.toFixed(2)}%</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                        {[0, points.length - 1].map(i => (
+                          <text key={i} x={toX(i)} y={svgH - 4} fill="#8a8a8a" fontSize="8" textAnchor="middle">
+                            {new Date(points[i].timestamp).toLocaleString('ja-JP', { month: '2-digit', day: '2-digit' })}
+                          </text>
+                        ))}
+                        <path d={areaD} fill="#ef535020" />
+                        <path d={pathD} fill="none" stroke="#ef5350" strokeWidth="2" />
+                        {points.map((p, i) => (
+                          <circle
+                            key={i}
+                            cx={toX(i)}
+                            cy={toY(Math.abs(p.drawdown_percent))}
+                            r={selectedDrawdownIndex === i ? 6 : 3}
+                            fill={selectedDrawdownIndex === i ? '#FFD700' : '#ef5350'}
+                            stroke={selectedDrawdownIndex === i ? '#FFD700' : 'none'}
+                            strokeWidth="2"
+                            className="cursor-pointer"
+                            onClick={() => setSelectedDrawdownIndex(selectedDrawdownIndex === i ? null : i)}
+                          />
+                        ))}
+                        {selectedDrawdownIndex !== null && points[selectedDrawdownIndex] && (
+                          <text
+                            x={toX(selectedDrawdownIndex)}
+                            y={toY(Math.abs(points[selectedDrawdownIndex].drawdown_percent)) + 16}
+                            fill="#FFD700"
+                            fontSize="10"
+                            fontWeight="bold"
+                            textAnchor="middle"
+                          >
+                            {points[selectedDrawdownIndex].drawdown_percent.toFixed(2)}%
+                          </text>
+                        )}
+                      </svg>
+                    )
+                  })()}
+                </div>
+              </div>
+            )}
+
+            {/* ドローダウンデータ一覧 */}
+            {drawdown && drawdown.points.length > 0 && (
+              <div className="flex-1 min-w-0 bg-bg-card rounded-lg p-2 border border-border flex flex-col">
+                <div className="flex items-center justify-between mb-1">
+                  <h2 className="text-sm font-semibold text-text-strong">ドローダウンデータ</h2>
+                  <span className="text-xs text-text-secondary">全{drawdown.points.length}件</span>
+                </div>
+                <div className="overflow-y-auto flex-1 min-h-0 border border-border rounded">
+                  <table className="w-full text-xs">
+                    <thead className="bg-bg-primary sticky top-0">
+                      <tr className="border-b border-border">
+                        <th className="px-1.5 py-1 text-left text-text-secondary font-semibold">日時</th>
+                        <th className="px-1.5 py-1 text-right text-text-secondary font-semibold">有効証拠金</th>
+                        <th className="px-1.5 py-1 text-right text-text-secondary font-semibold">DD金額</th>
+                        <th className="px-1.5 py-1 text-right text-text-secondary font-semibold">DD率</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {drawdown.points.map((point, index) => (
+                        <tr
+                          key={index}
+                          className={`border-b border-border cursor-pointer transition-colors ${
+                            selectedDrawdownIndex === index
+                              ? 'bg-btn-primary bg-opacity-30 hover:bg-opacity-40'
+                              : 'hover:bg-bg-secondary'
+                          }`}
+                          onClick={() => setSelectedDrawdownIndex(selectedDrawdownIndex === index ? null : index)}
+                          title={`ピーク証拠金: ¥${point.peak_equity.toLocaleString()}`}
+                        >
+                          <td className="px-1.5 py-1 text-text-primary">
+                            {new Date(point.timestamp).toLocaleString('ja-JP', {
+                              month: '2-digit',
+                              day: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </td>
+                          <td className="px-1.5 py-1 text-right text-text-primary">¥{point.equity.toLocaleString()}</td>
+                          <td className="px-1.5 py-1 text-right text-sell">¥{point.drawdown.toLocaleString()}</td>
+                          <td className="px-1.5 py-1 text-right font-bold text-sell">{point.drawdown_percent.toFixed(2)}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   )
