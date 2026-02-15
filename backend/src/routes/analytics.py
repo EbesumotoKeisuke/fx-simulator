@@ -184,13 +184,13 @@ async def get_trades_with_candles(
         start_time = min(opened_times)
         end_time = max(closed_times)
 
-        # ローソク足データを取得（最低本数を保証）
-        candles = market_service.get_candles_with_minimum(
+        # ローソク足データを取得（動的生成で最新データまで表示）
+        # get_candles_with_partial_last を使用して、H1/D1/W1も
+        # 下位時間足（M10等）から動的生成し、最新データまで表示する
+        candles, _ = market_service.get_candles_with_partial_last(
             timeframe=timeframe,
-            start_time=start_time,
-            end_time=end_time,
-            min_candles=min_candles,
-            limit=10000
+            current_time=end_time,
+            limit=max(min_candles, 10000)
         )
 
         # EMAを追加

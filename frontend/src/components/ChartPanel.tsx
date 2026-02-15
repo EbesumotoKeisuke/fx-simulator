@@ -62,6 +62,7 @@ interface OhlcDisplay {
   high: number
   low: number
   close: number
+  ema20?: number | null
 }
 
 /**
@@ -96,6 +97,8 @@ function ChartPanel({
   const [ohlcData, setOhlcData] = useState<OhlcDisplay | null>(null)
   // ローソク足データを保持（クロスヘア表示用）
   const candleDataRef = useRef<Map<string | number, CandlestickData>>(new Map())
+  // EMAデータを保持（クロスヘア表示用）
+  const emaDataRef = useRef<Map<string | number, number>>(new Map())
   // 前回の最新ローソク足のタイムスタンプ（新規ローソク検出用）
   const lastCandleTimeRef = useRef<string | number | null>(null)
   // 初回データ取得完了フラグ
@@ -331,6 +334,14 @@ function ChartPanel({
           formattedData.forEach((candle) => {
             candleDataRef.current.set(candle.time as string | number, candle)
           })
+          // EMAデータをMapに保存
+          emaDataRef.current.clear()
+          if (response.data.candles) {
+            const emaData = formatEmaData(response.data.candles)
+            emaData.forEach((point) => {
+              emaDataRef.current.set(point.time as string | number, point.value)
+            })
+          }
 
           // データ更新成功時に最終更新時刻を記録
           if (currentTime) {
@@ -671,12 +682,15 @@ function ChartPanel({
           const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][date.getUTCDay()]
           timeStr = `${year}/${month}/${day}(${dayOfWeek}) ${hour}:${minute}`
         }
+        // EMAデータを取得
+        const emaValue = param.time ? emaDataRef.current.get(param.time as string | number) : undefined
         setOhlcData({
           time: timeStr,
           open: data.open,
           high: data.high,
           low: data.low,
           close: data.close,
+          ema20: emaValue ?? null,
         })
       }
     }
@@ -799,12 +813,15 @@ function ChartPanel({
         timeStr = `${bd.year}/${String(bd.month).padStart(2, '0')}/${String(bd.day).padStart(2, '0')}(${dayOfWeek}) 00:00`
       }
 
+      // EMAデータを取得
+      const emaValue = candleTime ? emaDataRef.current.get(candleTime as string | number) : undefined
       setOhlcData({
         time: timeStr,
         open: candleData.open,
         high: candleData.high,
         low: candleData.low,
         close: candleData.close,
+        ema20: emaValue ?? null,
       })
 
       // クロスヘアラインの位置を計算
@@ -901,6 +918,14 @@ function ChartPanel({
             <span className={`font-semibold ${ohlcData.close >= ohlcData.open ? 'text-buy' : 'text-sell'}`}>
               {ohlcData.close.toFixed(3)}
             </span>
+            {ohlcData.ema20 != null && (
+              <>
+                <span className="text-text-primary">EMA:</span>
+                <span className="font-semibold" style={{ color: '#f0b90b' }}>
+                  {ohlcData.ema20.toFixed(3)}
+                </span>
+              </>
+            )}
           </div>
         )}
         <button

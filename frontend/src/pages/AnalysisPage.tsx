@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { analyticsApi, tradesApi, PerformanceMetrics, EquityCurveData, DrawdownData, Trade, Candle } from '../services/api'
 import { useSimulationStore } from '../store/simulationStore'
-import { createChart, IChartApi, ISeriesApi, CandlestickData, Time, MouseEventParams } from 'lightweight-charts'
+import { createChart, IChartApi, ISeriesApi, CandlestickData, LineData, Time, MouseEventParams } from 'lightweight-charts'
 import { logger } from '../utils/logger'
+import '../styles/pages/AnalysisPage.css'
 
 // 時間足の定義
 const TIMEFRAMES = ['W1', 'D1', 'H1', 'M10'] as const
@@ -15,6 +16,18 @@ const TIMEFRAME_LABELS: Record<Timeframe, string> = {
   H1: '1時間足(H1)',
   M10: '10分足(M10)',
 }
+
+// フィルタ演算子
+const FILTER_OPERATORS = [
+  { value: '>=', label: '≧' },
+  { value: '<=', label: '≦' },
+  { value: '>', label: '＞' },
+  { value: '<', label: '＜' },
+  { value: '=', label: '＝' },
+] as const
+
+type FilterConfig = { enabled: boolean; operator: string; value: number }
+const DEFAULT_FILTER: FilterConfig = { enabled: false, operator: '>=', value: 0 }
 
 /**
  * パフォーマンス分析ページコンポーネント
@@ -39,6 +52,12 @@ function AnalysisPage() {
   const [chartLoading, setChartLoading] = useState(false)
   const [selectedTradeIndex, setSelectedTradeIndex] = useState<number | null>(null)
 
+  // フィルタ state
+  const [sideFilter, setSideFilter] = useState<'all' | 'buy' | 'sell'>('all')
+  const [showFilterModal, setShowFilterModal] = useState(false)
+  const [pipsFilters, setPipsFilters] = useState<FilterConfig[]>([{ ...DEFAULT_FILTER }])
+  const [profitFilters, setProfitFilters] = useState<FilterConfig[]>([{ ...DEFAULT_FILTER }])
+
   // マーカー表示/非表示（時間足ごと）
   const [markerVisibility, setMarkerVisibility] = useState<Record<Timeframe, boolean>>({
     W1: true,
@@ -55,6 +74,12 @@ function AnalysisPage() {
     M10: null,
   })
   const chartRefs = useRef<Record<Timeframe, IChartApi | null>>({
+    W1: null,
+    D1: null,
+    H1: null,
+    M10: null,
+  })
+  const emaSeriesRefs = useRef<Record<Timeframe, ISeriesApi<'Line'> | null>>({
     W1: null,
     D1: null,
     H1: null,
@@ -186,6 +211,7 @@ function AnalysisPage() {
           chartRefs.current[tf]!.remove()
           chartRefs.current[tf] = null
           candleSeriesRefs.current[tf] = null
+          emaSeriesRefs.current[tf] = null
         }
       })
     }
@@ -248,6 +274,15 @@ function AnalysisPage() {
 
         candleSeriesRefs.current[tf] = candleSeries
 
+        // 20EMAラインシリーズを追加
+        const emaSeries = chart.addLineSeries({
+          color: '#f0b90b',
+          lineWidth: 2,
+          priceLineVisible: false,
+          crosshairMarkerVisible: false,
+        })
+        emaSeriesRefs.current[tf] = emaSeries
+
         // ローソク足データをフォーマット
         const chartData: CandlestickData[] = candles
           .map((candle) => {
@@ -266,6 +301,21 @@ function AnalysisPage() {
         if (chartData.length === 0) return
 
         candleSeries.setData(chartData)
+
+        // 20EMAデータを設定
+        const emaData: LineData[] = candles
+          .filter((c) => c.ema20 !== null && c.ema20 !== undefined)
+          .map((c) => {
+            const timestamp = new Date(c.timestamp).getTime() / 1000
+            return {
+              time: timestamp as Time,
+              value: c.ema20 as number,
+            }
+          })
+          .filter((d) => !isNaN(d.time as number))
+        if (emaData.length > 0) {
+          emaSeries.setData(emaData)
+        }
 
         // Map形式でデータを保持
         candleDataRefs.current[tf].clear()
@@ -441,6 +491,58 @@ function AnalysisPage() {
     event.target.value = ''
   }
 
+  // フィルタ条件の評価
+  const evaluateFilter = (value: number, filterConfig: FilterConfig): boolean => {
+    if (!filterConfig.enabled) return true
+    switch (filterConfig.operator) {
+      case '>=': return value >= filterConfig.value
+      case '<=': return value <= filterConfig.value
+      case '>': return value > filterConfig.value
+      case '<': return value < filterConfig.value
+      case '=': return value === filterConfig.value
+      default: return true
+    }
+  }
+
+  // フィルタリング結果
+  const filteredTrades = useMemo(() => {
+    return trades.filter(trade => {
+      // 売買方向フィルタ
+      if (sideFilter === 'buy' && trade.side !== 'buy') return false
+      if (sideFilter === 'sell' && trade.side !== 'sell') return false
+
+      // Pipsフィルタ（複数条件: OR）
+      const enabledPipsFilters = pipsFilters.filter(f => f.enabled)
+      if (enabledPipsFilters.length > 0) {
+        const passesAny = enabledPipsFilters.some(f => evaluateFilter(trade.realized_pnl_pips, f))
+        if (!passesAny) return false
+      }
+
+      // 損益フィルタ（複数条件: OR）
+      const enabledProfitFilters = profitFilters.filter(f => f.enabled)
+      if (enabledProfitFilters.length > 0) {
+        const passesAny = enabledProfitFilters.some(f => evaluateFilter(trade.realized_pnl, f))
+        if (!passesAny) return false
+      }
+
+      return true
+    })
+  }, [trades, sideFilter, pipsFilters, profitFilters])
+
+  // フィルタ後のインデックスから元のインデックスへのマッピング
+  const tradeIndexMap = useMemo(() => {
+    return filteredTrades.map(trade => trades.indexOf(trade))
+  }, [filteredTrades, trades])
+
+  // フィルタがアクティブかどうか
+  const isFilterActive = pipsFilters.some(f => f.enabled) || profitFilters.some(f => f.enabled)
+
+  // フィルタリセット
+  const handleFilterReset = () => {
+    setPipsFilters([{ ...DEFAULT_FILTER }])
+    setProfitFilters([{ ...DEFAULT_FILTER }])
+  }
+
   if (loading) {
     return (
       <div className="h-screen flex items-center justify-center bg-bg-primary">
@@ -510,9 +612,9 @@ function AnalysisPage() {
 
       <div className="p-4 space-y-4">
         {/* 売買履歴チャートとトレード履歴を横並び表示 */}
-        <div className="flex gap-4" style={{height: '85vh'}}>
+        <div className="flex gap-4 analysis-chart-trade-container">
           {/* 4つのチャート表示セクション */}
-          <div className="bg-bg-card rounded-lg p-3 border border-border flex flex-col" style={{ flex: 1, minWidth: 0 }}>
+          <div className="bg-bg-card rounded-lg p-3 border border-border flex flex-col analysis-chart-section">
             <div className="flex items-center justify-between mb-2">
               <h2 className="text-base font-semibold text-text-strong">売買履歴チャート</h2>
               <div className="flex items-center gap-4">
@@ -542,7 +644,7 @@ function AnalysisPage() {
                     <span>売り</span>
                   </div>
                   <div className="flex items-center gap-1">
-                    <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: '#FFD700' }}></span>
+                    <span className="inline-block w-2 h-2 rounded-full analysis-selected-marker"></span>
                     <span>選択中</span>
                   </div>
                 </div>
@@ -554,7 +656,7 @@ function AnalysisPage() {
                 <div className="text-lg">読み込み中...</div>
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-2 flex-1" style={{ gridTemplateRows: '1fr 1fr' }}>
+              <div className="grid grid-cols-2 gap-2 flex-1 analysis-chart-grid">
                 {TIMEFRAMES.map(tf => (
                   <div
                     key={tf}
@@ -568,7 +670,7 @@ function AnalysisPage() {
                     {candlesByTimeframe[tf].length > 0 ? (
                       <div
                         ref={(el) => { chartContainerRefs.current[tf] = el }}
-                        style={{ flex: 1 }}
+                        className="analysis-chart-container"
                       />
                     ) : (
                       <div className="flex items-center justify-center flex-1 text-text-secondary text-sm">
@@ -582,7 +684,7 @@ function AnalysisPage() {
           </div>
 
           {/* トレード履歴テーブル */}
-          <div className="bg-bg-card rounded-lg p-3 border border-border flex flex-col" style={{ width: '23%' }}>
+          <div className="bg-bg-card rounded-lg p-3 border border-border flex flex-col analysis-trade-section">
             <div className="flex items-center justify-between mb-2">
               <h2 className="text-base font-semibold text-text-strong">トレード履歴</h2>
               {selectedTradeIndex !== null && (
@@ -594,6 +696,201 @@ function AnalysisPage() {
                 </button>
               )}
             </div>
+
+            {/* 基本フィルタボタン */}
+            <div className="analysis-filter-container">
+              <button
+                onClick={() => setSideFilter('all')}
+                className={`analysis-filter-button ${sideFilter === 'all' ? 'analysis-filter-button--active' : ''}`}
+              >
+                全て ({trades.length}件)
+              </button>
+              <button
+                onClick={() => setSideFilter('buy')}
+                className={`analysis-filter-button ${sideFilter === 'buy' ? 'analysis-filter-button--active' : ''}`}
+              >
+                買い ({trades.filter(t => t.side === 'buy').length}件)
+              </button>
+              <button
+                onClick={() => setSideFilter('sell')}
+                className={`analysis-filter-button ${sideFilter === 'sell' ? 'analysis-filter-button--active' : ''}`}
+              >
+                売り ({trades.filter(t => t.side === 'sell').length}件)
+              </button>
+            </div>
+
+            {/* フィルタ設定ボタンと結果表示 */}
+            <div className="analysis-advanced-filter">
+              <button
+                onClick={() => setShowFilterModal(true)}
+                className="analysis-filter-settings-button"
+              >
+                フィルタ設定
+              </button>
+              <span className="analysis-filter-result">
+                {filteredTrades.length}件表示
+              </span>
+              {isFilterActive && (
+                <span className="analysis-active-filter-indicator">
+                  フィルタ適用中
+                </span>
+              )}
+            </div>
+
+            {/* フィルタ設定モーダル */}
+            {showFilterModal && (
+              <div className="analysis-modal-overlay" onClick={() => setShowFilterModal(false)}>
+                <div className="analysis-modal-content" onClick={(e) => e.stopPropagation()}>
+                  <div className="analysis-modal-header">
+                    <h3 className="analysis-modal-title">フィルタ設定</h3>
+                    <button onClick={() => setShowFilterModal(false)} className="analysis-modal-close-button">×</button>
+                  </div>
+
+                  <div className="analysis-modal-body">
+                    {/* Pipsフィルタセクション */}
+                    <div className="analysis-filter-section">
+                      <div className="analysis-filter-section-header">
+                        <span className="analysis-filter-section-title">Pipsフィルタ</span>
+                      </div>
+                      {pipsFilters.map((filterItem, index) => (
+                        <div key={index} className="analysis-filter-row">
+                          <label className="analysis-filter-label">
+                            <input
+                              type="checkbox"
+                              checked={filterItem.enabled}
+                              onChange={(e) => {
+                                setPipsFilters(prev => prev.map((f, i) =>
+                                  i === index ? { ...f, enabled: e.target.checked } : f
+                                ))
+                              }}
+                              className="analysis-checkbox"
+                            />
+                            条件{index + 1}
+                          </label>
+                          <select
+                            value={filterItem.operator}
+                            onChange={(e) => {
+                              setPipsFilters(prev => prev.map((f, i) =>
+                                i === index ? { ...f, operator: e.target.value } : f
+                              ))
+                            }}
+                            className="analysis-filter-select"
+                            disabled={!filterItem.enabled}
+                          >
+                            {FILTER_OPERATORS.map(op => (
+                              <option key={op.value} value={op.value}>{op.label}</option>
+                            ))}
+                          </select>
+                          <input
+                            type="number"
+                            value={filterItem.value}
+                            onChange={(e) => {
+                              setPipsFilters(prev => prev.map((f, i) =>
+                                i === index ? { ...f, value: parseFloat(e.target.value) || 0 } : f
+                              ))
+                            }}
+                            className="analysis-filter-input"
+                            disabled={!filterItem.enabled}
+                          />
+                          <span className="analysis-filter-unit">pips</span>
+                          {index > 0 && (
+                            <button
+                              onClick={() => setPipsFilters(prev => prev.filter((_, i) => i !== index))}
+                              className="analysis-remove-filter-button"
+                            >
+                              削除
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      <button
+                        onClick={() => setPipsFilters(prev => [...prev, { ...DEFAULT_FILTER }])}
+                        className="analysis-add-filter-button"
+                      >
+                        + 条件を追加 (OR)
+                      </button>
+                    </div>
+
+                    {/* 損益フィルタセクション */}
+                    <div className="analysis-filter-section">
+                      <div className="analysis-filter-section-header">
+                        <span className="analysis-filter-section-title">損益フィルタ</span>
+                      </div>
+                      {profitFilters.map((filterItem, index) => (
+                        <div key={index} className="analysis-filter-row">
+                          <label className="analysis-filter-label">
+                            <input
+                              type="checkbox"
+                              checked={filterItem.enabled}
+                              onChange={(e) => {
+                                setProfitFilters(prev => prev.map((f, i) =>
+                                  i === index ? { ...f, enabled: e.target.checked } : f
+                                ))
+                              }}
+                              className="analysis-checkbox"
+                            />
+                            条件{index + 1}
+                          </label>
+                          <select
+                            value={filterItem.operator}
+                            onChange={(e) => {
+                              setProfitFilters(prev => prev.map((f, i) =>
+                                i === index ? { ...f, operator: e.target.value } : f
+                              ))
+                            }}
+                            className="analysis-filter-select"
+                            disabled={!filterItem.enabled}
+                          >
+                            {FILTER_OPERATORS.map(op => (
+                              <option key={op.value} value={op.value}>{op.label}</option>
+                            ))}
+                          </select>
+                          <input
+                            type="number"
+                            value={filterItem.value}
+                            onChange={(e) => {
+                              setProfitFilters(prev => prev.map((f, i) =>
+                                i === index ? { ...f, value: parseFloat(e.target.value) || 0 } : f
+                              ))
+                            }}
+                            className="analysis-filter-input"
+                            disabled={!filterItem.enabled}
+                          />
+                          <span className="analysis-filter-unit">円</span>
+                          {index > 0 && (
+                            <button
+                              onClick={() => setProfitFilters(prev => prev.filter((_, i) => i !== index))}
+                              className="analysis-remove-filter-button"
+                            >
+                              削除
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      <button
+                        onClick={() => setProfitFilters(prev => [...prev, { ...DEFAULT_FILTER }])}
+                        className="analysis-add-filter-button"
+                      >
+                        + 条件を追加 (OR)
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="analysis-modal-footer">
+                    <button
+                      onClick={handleFilterReset}
+                      className="analysis-reset-button"
+                    >
+                      リセット
+                    </button>
+                    <button onClick={() => setShowFilterModal(false)} className="analysis-apply-button">
+                      閉じる
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {trades.length > 0 ? (
               <>
                 <div className="text-xs text-text-secondary mb-2">
@@ -610,44 +907,47 @@ function AnalysisPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {trades.map((trade, index) => (
-                        <tr
-                          key={trade.trade_id || index}
-                          className={`border-b border-border cursor-pointer transition-colors ${
-                            selectedTradeIndex === index
-                              ? 'bg-btn-primary bg-opacity-30 hover:bg-opacity-40'
-                              : 'hover:bg-bg-secondary'
-                          }`}
-                          onClick={() => setSelectedTradeIndex(selectedTradeIndex === index ? null : index)}
-                          title={`エントリー: ${trade.entry_price.toFixed(3)} → 決済: ${trade.exit_price.toFixed(3)}`}
-                        >
-                          <td className="px-2 py-1.5 text-text-primary">
-                            {new Date(trade.closed_at).toLocaleString('ja-JP', {
-                              month: '2-digit',
-                              day: '2-digit',
-                              hour: '2-digit',
-                              minute: '2-digit'
-                            })}
-                          </td>
-                          <td className="px-2 py-1.5 text-center">
-                            <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${
-                              trade.side === 'buy' ? 'bg-buy bg-opacity-20 text-buy' : 'bg-sell bg-opacity-20 text-sell'
+                      {filteredTrades.map((trade, filteredIndex) => {
+                        const originalIndex = tradeIndexMap[filteredIndex]
+                        return (
+                          <tr
+                            key={trade.trade_id || originalIndex}
+                            className={`border-b border-border cursor-pointer transition-colors ${
+                              selectedTradeIndex === originalIndex
+                                ? 'bg-btn-primary bg-opacity-30 hover:bg-opacity-40'
+                                : 'hover:bg-bg-secondary'
+                            }`}
+                            onClick={() => setSelectedTradeIndex(selectedTradeIndex === originalIndex ? null : originalIndex)}
+                            title={`エントリー: ${trade.entry_price.toFixed(3)} → 決済: ${trade.exit_price.toFixed(3)}`}
+                          >
+                            <td className="px-2 py-1.5 text-text-primary">
+                              {new Date(trade.closed_at).toLocaleString('ja-JP', {
+                                month: '2-digit',
+                                day: '2-digit',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
+                            </td>
+                            <td className="px-2 py-1.5 text-center">
+                              <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${
+                                trade.side === 'buy' ? 'bg-buy bg-opacity-20 text-buy' : 'bg-sell bg-opacity-20 text-sell'
+                              }`}>
+                                {trade.side === 'buy' ? '買' : '売'}
+                              </span>
+                            </td>
+                            <td className={`px-2 py-1.5 text-right font-bold ${
+                              trade.realized_pnl >= 0 ? 'text-buy' : 'text-sell'
                             }`}>
-                              {trade.side === 'buy' ? '買' : '売'}
-                            </span>
-                          </td>
-                          <td className={`px-2 py-1.5 text-right font-bold ${
-                            trade.realized_pnl >= 0 ? 'text-buy' : 'text-sell'
-                          }`}>
-                            {trade.realized_pnl >= 0 ? '+' : ''}¥{trade.realized_pnl.toLocaleString()}
-                          </td>
-                          <td className={`px-2 py-1.5 text-right font-bold ${
-                            trade.realized_pnl_pips >= 0 ? 'text-buy' : 'text-sell'
-                          }`}>
-                            {trade.realized_pnl_pips >= 0 ? '+' : ''}{trade.realized_pnl_pips.toFixed(1)}
-                          </td>
-                        </tr>
-                      ))}
+                              {trade.realized_pnl >= 0 ? '+' : ''}¥{trade.realized_pnl.toLocaleString()}
+                            </td>
+                            <td className={`px-2 py-1.5 text-right font-bold ${
+                              trade.realized_pnl_pips >= 0 ? 'text-buy' : 'text-sell'
+                            }`}>
+                              {trade.realized_pnl_pips >= 0 ? '+' : ''}{trade.realized_pnl_pips.toFixed(1)}
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -719,7 +1019,7 @@ function AnalysisPage() {
             {/* リスクリターン指標 */}
             <div className="bg-bg-card rounded-lg p-4 border border-border">
               <h2 className="font-semibold text-text-strong mb-3">リスクリターン指標</h2>
-              <div className="grid gap-y-2" style={{ gridTemplateColumns: 'auto 1fr auto 1fr' }}>
+              <div className="grid gap-y-2 analysis-risk-return-grid">
                 <span className="text-text-primary pr-2">平均利益:</span>
                 <span className="text-buy font-semibold text-right pr-4">¥{performance.risk_return.average_win.toLocaleString()}</span>
                 <span className="text-text-primary pr-2">最大利益:</span>
@@ -779,7 +1079,7 @@ function AnalysisPage() {
 
         {/* 資産曲線 + ドローダウン：4カラム横並び */}
         {(equityCurve && equityCurve.points.length > 0) || (drawdown && drawdown.points.length > 0) ? (
-          <div className="flex gap-2" style={{ height: '340px' }}>
+          <div className="flex gap-2 analysis-equity-dd-container">
             {/* 資産曲線グラフ */}
             {equityCurve && equityCurve.points.length > 0 && (
               <div className="flex-1 min-w-0 bg-bg-card rounded-lg p-2 border border-border flex flex-col">
@@ -794,7 +1094,7 @@ function AnalysisPage() {
                     </button>
                   )}
                 </div>
-                <div className="flex-1 min-h-0 border border-border rounded overflow-hidden bg-[#1a1a1a] p-1">
+                <div className="flex-1 min-h-0 border border-border rounded overflow-hidden analysis-graph-bg p-1">
                   {(() => {
                     const points = equityCurve.points
                     const values = points.map(p => p.equity)
@@ -925,7 +1225,7 @@ function AnalysisPage() {
                     </button>
                   )}
                 </div>
-                <div className="flex-1 min-h-0 border border-border rounded overflow-hidden bg-[#1a1a1a] p-1">
+                <div className="flex-1 min-h-0 border border-border rounded overflow-hidden analysis-graph-bg p-1">
                   {(() => {
                     const points = drawdown.points
                     const absValues = points.map(p => Math.abs(p.drawdown_percent))

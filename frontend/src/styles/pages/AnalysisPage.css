@@ -1,0 +1,289 @@
+/**
+ * AnalysisPage 専用スタイル
+ *
+ * インラインスタイルを外部CSSに抽出し、メンテナンス性を向上させる。
+ */
+
+/* ========== レイアウト ========== */
+
+/* 売買履歴チャート + トレード履歴の横並びコンテナ */
+.analysis-chart-trade-container {
+  height: 85vh;
+}
+
+/* 4チャート表示セクション */
+.analysis-chart-section {
+  flex: 1;
+  min-width: 0;
+}
+
+/* トレード履歴テーブルセクション */
+.analysis-trade-section {
+  width: 23%;
+}
+
+/* 4チャートのグリッドレイアウト */
+.analysis-chart-grid {
+  grid-template-rows: 1fr 1fr;
+}
+
+/* チャートコンテナ（flex: 1 で残り空間を埋める） */
+.analysis-chart-container {
+  flex: 1;
+}
+
+/* リスクリターン指標のグリッド */
+.analysis-risk-return-grid {
+  grid-template-columns: auto 1fr auto 1fr;
+}
+
+/* 資産曲線 + ドローダウンのコンテナ */
+.analysis-equity-dd-container {
+  height: 340px;
+}
+
+/* ========== グラフ背景 ========== */
+
+/* SVGグラフの背景色 */
+.analysis-graph-bg {
+  background-color: #1a1a1a;
+}
+
+/* ========== マーカー ========== */
+
+/* 選択中マーカーのカラー */
+.analysis-selected-marker {
+  background-color: #FFD700;
+}
+
+/* ========== フィルタ ========== */
+
+/* 基本フィルタボタンコンテナ */
+.analysis-filter-container {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 4px;
+  flex-shrink: 0;
+}
+
+.analysis-filter-button {
+  padding: 3px 6px;
+  font-size: 11px;
+  border-radius: 4px;
+  border: 1px solid #3a3a3a;
+  background-color: #1a1a2e;
+  color: #8a8a8a;
+  cursor: pointer;
+}
+
+.analysis-filter-button--active {
+  background-color: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+
+/* 詳細フィルタ行 */
+.analysis-advanced-filter {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 4px;
+  padding: 4px 6px;
+  background-color: #1a1a2e;
+  border-radius: 4px;
+  align-items: center;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.analysis-filter-settings-button {
+  padding: 3px 10px;
+  font-size: 11px;
+  border-radius: 4px;
+  border: 1px solid #2563eb;
+  background-color: #2563eb;
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.analysis-filter-result {
+  color: #26a69a;
+  font-size: 11px;
+  margin-left: auto;
+}
+
+.analysis-active-filter-indicator {
+  padding: 1px 6px;
+  font-size: 10px;
+  border-radius: 10px;
+  background-color: #26a69a;
+  color: #ffffff;
+}
+
+/* ========== フィルタモーダル ========== */
+
+.analysis-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.analysis-modal-content {
+  background-color: #1e1e2e;
+  border-radius: 8px;
+  width: 420px;
+  max-height: 80vh;
+  overflow: auto;
+  border: 1px solid #3a3a3a;
+}
+
+.analysis-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #3a3a3a;
+}
+
+.analysis-modal-title {
+  margin: 0;
+  font-size: 15px;
+  color: #ffffff;
+}
+
+.analysis-modal-close-button {
+  background: none;
+  border: none;
+  color: #8a8a8a;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.analysis-modal-body {
+  padding: 16px;
+}
+
+.analysis-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid #3a3a3a;
+}
+
+/* ========== フィルタセクション ========== */
+
+.analysis-filter-section {
+  margin-bottom: 20px;
+}
+
+.analysis-filter-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.analysis-filter-section-title {
+  font-size: 13px;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.analysis-filter-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  background-color: #2a2a3a;
+  border-radius: 4px;
+}
+
+.analysis-filter-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #8a8a8a;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.analysis-checkbox {
+  cursor: pointer;
+}
+
+.analysis-filter-select {
+  padding: 3px 6px;
+  font-size: 12px;
+  border-radius: 4px;
+  border: 1px solid #3a3a3a;
+  background-color: #1a1a2e;
+  color: #d1d4dc;
+  cursor: pointer;
+}
+
+.analysis-filter-input {
+  width: 60px;
+  padding: 3px 6px;
+  font-size: 12px;
+  border-radius: 4px;
+  border: 1px solid #3a3a3a;
+  background-color: #1a1a2e;
+  color: #d1d4dc;
+}
+
+.analysis-filter-unit {
+  color: #8a8a8a;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.analysis-add-filter-button {
+  padding: 5px 10px;
+  font-size: 11px;
+  border-radius: 4px;
+  border: 1px dashed #3a3a3a;
+  background-color: transparent;
+  color: #8a8a8a;
+  cursor: pointer;
+  width: 100%;
+}
+
+.analysis-remove-filter-button {
+  padding: 3px 6px;
+  font-size: 10px;
+  border-radius: 4px;
+  border: none;
+  background-color: #ef5350;
+  color: #ffffff;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.analysis-reset-button {
+  padding: 5px 14px;
+  font-size: 12px;
+  border-radius: 4px;
+  border: 1px solid #3a3a3a;
+  background-color: transparent;
+  color: #8a8a8a;
+  cursor: pointer;
+}
+
+.analysis-apply-button {
+  padding: 5px 14px;
+  font-size: 12px;
+  border-radius: 4px;
+  border: none;
+  background-color: #2563eb;
+  color: #ffffff;
+  cursor: pointer;
+}

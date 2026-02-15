@@ -3,6 +3,7 @@ import { positionsApi, Position, SetSLTPRequest, AccountInfo } from '../services
 import { useSimulationStore } from '../store/simulationStore'
 import { logger } from '../utils/logger'
 import LoadingSpinner from './LoadingSpinner'
+import { SL_PIPS_PRESETS, calculateSlPipsDifference } from '../constants/presets'
 
 interface PositionPanelProps {
   refreshTrigger?: number
@@ -112,37 +113,38 @@ function PositionPanel({ refreshTrigger, account, currentPrice }: PositionPanelP
   const handleEditSltp = (position: Position) => {
     setEditingPosition(position)
 
-    // 既存のSL/TP値を設定
+    // 既存のSL/TP値を設定（常にpips指定をデフォルトにする）
+    setSlType('pips')
+    setTpType('pips')
+
     if (position.sl_price) {
       setEnableSL(true)
-      setSlType('price')
-      setSlPrice(String(position.sl_price))
-      setSlPips('')
+      // 価格からpips値を逆算
+      const pips = calculateSlPipsDifference(position.entry_price, position.sl_price, position.side)
+      setSlPips(String(Math.round(pips)))
+      setSlPrice('')
     } else if (position.sl_pips) {
       setEnableSL(true)
-      setSlType('pips')
       setSlPips(String(position.sl_pips))
       setSlPrice('')
     } else {
       setEnableSL(false)
-      setSlType('pips')
       setSlPrice('')
       setSlPips('')
     }
 
     if (position.tp_price) {
       setEnableTP(true)
-      setTpType('price')
-      setTpPrice(String(position.tp_price))
-      setTpPips('')
+      // 価格からpips値を逆算（TPはSLの逆方向）
+      const pips = calculateSlPipsDifference(position.entry_price, position.tp_price, position.side)
+      setTpPips(String(Math.round(pips)))
+      setTpPrice('')
     } else if (position.tp_pips) {
       setEnableTP(true)
-      setTpType('pips')
       setTpPips(String(position.tp_pips))
       setTpPrice('')
     } else {
       setEnableTP(false)
-      setTpType('pips')
       setTpPrice('')
       setTpPips('')
     }
@@ -218,34 +220,34 @@ function PositionPanel({ refreshTrigger, account, currentPrice }: PositionPanelP
   return (
     <div className="bg-bg-card rounded-lg p-3 h-full flex flex-col overflow-hidden">
       {/* 固定ヘッダー */}
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-lg font-semibold text-text-strong">
+      <div className="flex items-center justify-between mb-2 whitespace-nowrap overflow-hidden">
+        <h3 className="text-lg font-semibold text-text-strong flex-shrink-0">
           ポジション
           {positions.length > 0 && (
             <span className="ml-2 text-text-secondary">({positions.length})</span>
           )}
         </h3>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 min-w-0">
           {positions.length > 0 && (
-            <span className="text-base text-text-secondary">
-              使用証拠金: ¥{totalMargin.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+            <span className="text-xs text-text-secondary">
+              証拠金: ¥{totalMargin.toLocaleString(undefined, { maximumFractionDigits: 0 })}
               {account?.margin_available !== undefined && currentPrice && currentPrice > 0 && (
                 <>
-                  {' 　'} (残証拠金: ¥{account.margin_available.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                  {' '}(残: ¥{account.margin_available.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                   {' / '}
                   {((account.margin_available * 25) / currentPrice).toLocaleString(undefined, { maximumFractionDigits: 0 })}通貨)
                 </>
               )}
             </span>
           )}
-          <span className={`text-lg font-semibold ${totalPnl >= 0 ? 'text-buy' : 'text-sell'}`}>
-            合計損益: {totalPnl >= 0 ? '+' : ''}{totalPnl.toLocaleString()}円
+          <span className={`text-lg font-semibold flex-shrink-0 ${totalPnl >= 0 ? 'text-buy' : 'text-sell'}`}>
+            損益: {totalPnl >= 0 ? '+' : ''}{totalPnl.toLocaleString()}円
           </span>
           {positions.length > 0 && (
             <button
               onClick={handleCloseAll}
               disabled={loading || (status !== 'running' && status !== 'paused')}
-              className="px-3 py-1 bg-sell text-text-strong rounded text-sm hover:opacity-80 disabled:opacity-50 flex items-center gap-2"
+              className="px-3 py-1 bg-sell text-text-strong rounded text-sm hover:opacity-80 disabled:opacity-50 flex items-center gap-2 flex-shrink-0"
             >
               {loading && <LoadingSpinner size="sm" />}
               {loading ? '処理中...' : '全決済'}
@@ -322,7 +324,14 @@ function PositionPanel({ refreshTrigger, account, currentPrice }: PositionPanelP
                       <td className="text-right py-1 px-1">{pos.entry_price.toFixed(3)}</td>
                       <td className="text-right py-1 px-1">{pos.current_price?.toFixed(3) || '-'}</td>
                       <td className="text-right py-1 px-1 text-sm text-sell">
-                        {pos.sl_price ? pos.sl_price.toFixed(3) : pos.sl_pips ? `${pos.sl_pips}p` : '-'}
+                        {pos.sl_price ? (
+                          <>
+                            {pos.sl_price.toFixed(3)}
+                            <span className="text-text-secondary ml-0.5">
+                              ({calculateSlPipsDifference(pos.entry_price, pos.sl_price, pos.side).toFixed(0)}p)
+                            </span>
+                          </>
+                        ) : pos.sl_pips ? `${pos.sl_pips}p` : '-'}
                       </td>
                       <td className="text-right py-1 px-1 text-sm text-buy">
                         {pos.tp_price ? pos.tp_price.toFixed(3) : pos.tp_pips ? `${pos.tp_pips}p` : '-'}
@@ -421,38 +430,20 @@ function PositionPanel({ refreshTrigger, account, currentPrice }: PositionPanelP
                       </>
                     )}
                   </div>
-                  {/* SLプリセットボタン */}
+                  {/* SLプリセットボタン（共通定数使用） */}
                   {slType === 'pips' && (
                     <div className="flex gap-2 mt-2">
                       <span className="text-xs text-text-secondary">プリセット:</span>
-                      <button
-                        type="button"
-                        onClick={() => setSlPips('-10')}
-                        className="px-3 py-1 bg-bg-primary border border-border rounded text-sm hover:bg-border"
-                      >
-                        -10
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSlPips('-20')}
-                        className="px-3 py-1 bg-bg-primary border border-border rounded text-sm hover:bg-border"
-                      >
-                        -20
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSlPips('-30')}
-                        className="px-3 py-1 bg-bg-primary border border-border rounded text-sm hover:bg-border"
-                      >
-                        -30
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSlPips('-50')}
-                        className="px-3 py-1 bg-bg-primary border border-border rounded text-sm hover:bg-border"
-                      >
-                        -50
-                      </button>
+                      {SL_PIPS_PRESETS.map(pips => (
+                        <button
+                          key={pips}
+                          type="button"
+                          onClick={() => setSlPips(String(pips))}
+                          className="px-3 py-1 bg-bg-primary border border-border rounded text-sm hover:bg-border"
+                        >
+                          {pips}
+                        </button>
+                      ))}
                     </div>
                   )}
                   <div className="text-xs text-text-secondary mt-1">

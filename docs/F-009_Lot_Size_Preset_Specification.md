@@ -160,6 +160,7 @@ const formatLotSize = (lotSize: number): string => {
 
 ```tsx
 const LOT_PRESETS = [
+  { slPips: 1, label: '1p' },   // SL 1pips時のロットサイズ
   { slPips: 10, label: '10p' },
   { slPips: 20, label: '20p' },
   { slPips: 30, label: '30p' },

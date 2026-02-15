@@ -534,6 +534,19 @@ class MarketDataService:
         # 市場営業時間外のデータを除外（週足・日足はスキップ）
         source_candles = filter_market_hours(source_candles, source_timeframe)
 
+        # D1でH1データが0件の場合、M10にフォールバック（週末越え対応）
+        if not source_candles and timeframe == 'D1':
+            logger.debug(f"[D1] H1データなし、M10にフォールバック: {start_time} - {current_time}")
+            source_candles = (
+                self.db.query(Candle)
+                .filter(Candle.timeframe == 'M10')
+                .filter(Candle.timestamp >= start_time)
+                .filter(Candle.timestamp <= current_time)
+                .order_by(Candle.timestamp.asc())
+                .all()
+            )
+            source_candles = filter_market_hours(source_candles, 'M10')
+
         # 元データが0件の場合はNoneを返す
         if not source_candles:
             return None

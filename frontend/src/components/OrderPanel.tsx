@@ -3,6 +3,7 @@ import { ordersApi, PendingOrderRequest, AccountInfo } from '../services/api'
 import { useSimulationStore } from '../store/simulationStore'
 import { logger } from '../utils/logger'
 import LoadingSpinner from './LoadingSpinner'
+import { SL_PIPS_PRESETS, LOT_PRESETS, calculateRiskBasedLotSize, formatLotSize } from '../constants/presets'
 
 interface OrderPanelProps {
   currentPrice: number
@@ -28,7 +29,6 @@ function OrderPanel({
   onLotUnitChange
 }: OrderPanelProps) {
   const [orderType, setOrderType] = useState<'market' | 'limit' | 'stop'>('market')
-  const [side, setSide] = useState<'buy' | 'sell'>('buy')
   const [internalLotQuantity, setInternalLotQuantity] = useState('1')
   const [internalLotUnit, setInternalLotUnit] = useState('10000')
 
@@ -73,7 +73,7 @@ function OrderPanel({
     return totalUnits / 100000
   }
 
-  const handleMarketOrder = async () => {
+  const handleMarketOrder = async (side: 'buy' | 'sell') => {
     if (!canTrade) {
       setMessage('シミュレーションが実行中ではありません')
       return
@@ -128,13 +128,13 @@ function OrderPanel({
     }
   }
 
-  const handlePendingOrder = async () => {
+  const handlePendingOrder = async (side: 'buy' | 'sell') => {
     if (!canTrade) {
       setMessage('シミュレーションが実行中ではありません')
       return
     }
 
-    const price = parseFloat(triggerPrice)
+    const price = parseFloat(triggerPrice) || currentPrice
     if (!price || price <= 0) {
       setMessage('トリガー価格を入力してください')
       return
@@ -172,11 +172,11 @@ function OrderPanel({
     }
   }
 
-  const handleOrder = () => {
+  const handleOrder = (side: 'buy' | 'sell') => {
     if (orderType === 'market') {
-      handleMarketOrder()
+      handleMarketOrder(side)
     } else {
-      handlePendingOrder()
+      handlePendingOrder(side)
     }
   }
 
@@ -188,32 +188,14 @@ function OrderPanel({
     return pips
   }
 
-  // 1%リスクロットサイズを計算
-  const calculateRiskBasedLotSize = (balance: number, slPips: number): number => {
-    const RISK_RATE = 0.01 // 1%
-    const PIP_VALUE_PER_UNIT = 0.01 // 1通貨あたり0.01円
-
-    // ロットサイズ = (資産 × リスク率) / (SL pips × 1pip値)
-    const lotSize = (balance * RISK_RATE) / (slPips * PIP_VALUE_PER_UNIT)
-
-    // 1,000通貨未満は切り捨て
-    return Math.floor(lotSize / 1000) * 1000
+  // 注文タイプ変更時にトリガー価格をプリセット
+  const handleOrderTypeChange = (newType: 'market' | 'limit' | 'stop') => {
+    setOrderType(newType)
+    // 指値/逆指値に切り替え時、トリガー価格が空なら現在価格をプリセット
+    if (newType !== 'market' && !triggerPrice && currentPrice > 0) {
+      setTriggerPrice(currentPrice.toFixed(3))
+    }
   }
-
-  // 表示用フォーマット（k単位）
-  const formatLotSize = (lotSize: number): string => {
-    const k = Math.floor(lotSize / 1000)
-    return `${k}k`
-  }
-
-  // プリセット定義
-  const LOT_PRESETS = [
-    { slPips: 10, label: '10p' },
-    { slPips: 20, label: '20p' },
-    { slPips: 30, label: '30p' },
-    { slPips: 40, label: '40p' },
-    { slPips: 50, label: '50p' },
-  ]
 
   return (
     <div className="bg-bg-card border-t border-border p-3">
@@ -228,7 +210,7 @@ function OrderPanel({
                 type="radio"
                 value="market"
                 checked={orderType === 'market'}
-                onChange={(e) => setOrderType(e.target.value as 'market')}
+                onChange={() => handleOrderTypeChange('market')}
               />
               <span className="text-sm">成行</span>
             </label>
@@ -237,7 +219,7 @@ function OrderPanel({
                 type="radio"
                 value="limit"
                 checked={orderType === 'limit'}
-                onChange={(e) => setOrderType(e.target.value as 'limit')}
+                onChange={() => handleOrderTypeChange('limit')}
               />
               <span className="text-sm">指値</span>
             </label>
@@ -246,23 +228,10 @@ function OrderPanel({
                 type="radio"
                 value="stop"
                 checked={orderType === 'stop'}
-                onChange={(e) => setOrderType(e.target.value as 'stop')}
+                onChange={() => handleOrderTypeChange('stop')}
               />
               <span className="text-sm">逆指値</span>
             </label>
-          </div>
-
-          {/* 売買方向 */}
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-text-secondary">方向:</label>
-            <select
-              value={side}
-              onChange={(e) => setSide(e.target.value as 'buy' | 'sell')}
-              className="px-2 py-1 bg-bg-primary border border-border rounded text-sm"
-            >
-              <option value="buy">買</option>
-              <option value="sell">売</option>
-            </select>
           </div>
 
           {/* ロット数 */}
@@ -314,18 +283,26 @@ function OrderPanel({
             現在価格: <span className="text-text-primary">{currentPrice.toFixed(3)}</span>
           </div>
 
-          {/* 注文ボタン */}
+          {/* 注文ボタン（買い/売り） */}
           <button
-            onClick={handleOrder}
+            onClick={() => handleOrder('buy')}
             disabled={!canTrade || isOrdering}
-            className="px-4 py-1 bg-btn-primary text-text-strong rounded hover:opacity-80 disabled:opacity-50 flex items-center gap-2"
+            className="px-4 py-1 bg-buy text-white rounded hover:opacity-80 disabled:opacity-50 flex items-center gap-2 font-bold"
           >
             {isOrdering && <LoadingSpinner size="sm" />}
-            {isOrdering ? '処理中...' : '注文'}
+            買い注文
+          </button>
+          <button
+            onClick={() => handleOrder('sell')}
+            disabled={!canTrade || isOrdering}
+            className="px-4 py-1 bg-sell text-white rounded hover:opacity-80 disabled:opacity-50 flex items-center gap-2 font-bold"
+          >
+            {isOrdering && <LoadingSpinner size="sm" />}
+            売り注文
           </button>
 
-          {/* 1%リスクプリセット（注文ボタンの横に配置） */}
-          {account && orderType === 'market' && (
+          {/* 1%リスクプリセット（全注文タイプで表示） */}
+          {account && (
             <div className="flex items-center gap-2 pl-2 border-l border-border">
               <span className="text-xs text-text-secondary whitespace-nowrap">
                 1%リスク(¥{(account.balance / 1000).toFixed(0)}k):
@@ -365,135 +342,115 @@ function OrderPanel({
           )}
         </div>
 
-        {/* 第2行: SL/TP設定（成行注文のみ） */}
-        {orderType === 'market' && (
-          <div className="flex items-center gap-4 pl-2 border-l-2 border-border">
-            {/* SL設定 */}
-            <div className="flex items-center gap-2">
-              <label className="flex items-center gap-1">
-                <input
-                  type="checkbox"
-                  checked={enableSL}
-                  onChange={(e) => setEnableSL(e.target.checked)}
-                />
-                <span className="text-sm text-sell">SL:</span>
-              </label>
-              {enableSL && (
-                <>
-                  <select
-                    value={slType}
-                    onChange={(e) => setSlType(e.target.value as 'price' | 'pips')}
-                    className="px-2 py-1 bg-bg-primary border border-border rounded text-sm"
-                  >
-                    <option value="pips">pips</option>
-                    <option value="price">価格</option>
-                  </select>
-                  {slType === 'price' ? (
+        {/* 第2行: SL/TP設定（全注文タイプで表示） */}
+        <div className="flex items-center gap-4 pl-2 border-l-2 border-border">
+          {/* SL設定 */}
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1">
+              <input
+                type="checkbox"
+                checked={enableSL}
+                onChange={(e) => setEnableSL(e.target.checked)}
+              />
+              <span className="text-sm text-sell">SL:</span>
+            </label>
+            {enableSL && (
+              <>
+                <select
+                  value={slType}
+                  onChange={(e) => setSlType(e.target.value as 'price' | 'pips')}
+                  className="px-2 py-1 bg-bg-primary border border-border rounded text-sm"
+                >
+                  <option value="pips">pips</option>
+                  <option value="price">価格</option>
+                </select>
+                {slType === 'price' ? (
+                  <input
+                    type="number"
+                    value={slPrice}
+                    onChange={(e) => setSlPrice(e.target.value)}
+                    placeholder={currentPrice.toFixed(3)}
+                    className="w-24 px-2 py-1 bg-bg-primary border border-border rounded text-sm"
+                    step="0.001"
+                  />
+                ) : (
+                  <>
                     <input
                       type="number"
-                      value={slPrice}
-                      onChange={(e) => setSlPrice(e.target.value)}
-                      placeholder={currentPrice.toFixed(3)}
-                      className="w-24 px-2 py-1 bg-bg-primary border border-border rounded text-sm"
-                      step="0.001"
-                    />
-                  ) : (
-                    <>
-                      <input
-                        type="number"
-                        value={slPips}
-                        onChange={(e) => setSlPips(e.target.value)}
-                        placeholder="±20"
-                        className="w-20 px-2 py-1 bg-bg-primary border border-border rounded text-sm"
-                        step="1"
-                      />
-                      <span className="text-xs text-text-secondary">pips</span>
-                      {/* SLプリセットボタン */}
-                      <div className="flex gap-1">
-                        <button
-                          type="button"
-                          onClick={() => setSlPips('-30')}
-                          className="px-2 py-0.5 bg-bg-primary border border-border rounded text-xs hover:bg-border"
-                        >
-                          -30
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setSlPips('-20')}
-                          className="px-2 py-0.5 bg-bg-primary border border-border rounded text-xs hover:bg-border"
-                        >
-                          -20
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setSlPips('20')}
-                          className="px-2 py-0.5 bg-bg-primary border border-border rounded text-xs hover:bg-border"
-                        >
-                          +20
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setSlPips('30')}
-                          className="px-2 py-0.5 bg-bg-primary border border-border rounded text-xs hover:bg-border"
-                        >
-                          +30
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </>
-              )}
-            </div>
-
-            {/* TP設定 */}
-            <div className="flex items-center gap-2">
-              <label className="flex items-center gap-1">
-                <input
-                  type="checkbox"
-                  checked={enableTP}
-                  onChange={(e) => setEnableTP(e.target.checked)}
-                />
-                <span className="text-sm text-buy">TP:</span>
-              </label>
-              {enableTP && (
-                <>
-                  <select
-                    value={tpType}
-                    onChange={(e) => setTpType(e.target.value as 'price' | 'pips')}
-                    className="px-2 py-1 bg-bg-primary border border-border rounded text-sm"
-                  >
-                    <option value="pips">pips</option>
-                    <option value="price">価格</option>
-                  </select>
-                  {tpType === 'price' ? (
-                    <input
-                      type="number"
-                      value={tpPrice}
-                      onChange={(e) => setTpPrice(e.target.value)}
-                      placeholder={currentPrice.toFixed(3)}
-                      className="w-24 px-2 py-1 bg-bg-primary border border-border rounded text-sm"
-                      step="0.001"
-                    />
-                  ) : (
-                    <input
-                      type="number"
-                      value={tpPips}
-                      onChange={(e) => setTpPips(e.target.value)}
-                      placeholder="30"
+                      value={slPips}
+                      onChange={(e) => setSlPips(e.target.value)}
+                      placeholder="±20"
                       className="w-20 px-2 py-1 bg-bg-primary border border-border rounded text-sm"
                       step="1"
                     />
-                  )}
-                  {tpType === 'pips' && <span className="text-xs text-text-secondary">pips</span>}
-                </>
-              )}
-            </div>
-
-            <div className="text-xs text-text-secondary">
-              ※ SL/TP: pips値で指定（正負どちらも可、エントリー価格からの差分として計算されます）
-            </div>
+                    <span className="text-xs text-text-secondary">pips</span>
+                    {/* SLプリセットボタン（共通定数使用） */}
+                    <div className="flex gap-1">
+                      {SL_PIPS_PRESETS.map(pips => (
+                        <button
+                          key={pips}
+                          type="button"
+                          onClick={() => setSlPips(String(pips))}
+                          className="px-2 py-0.5 bg-bg-primary border border-border rounded text-xs hover:bg-border"
+                        >
+                          {pips}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </>
+            )}
           </div>
-        )}
+
+          {/* TP設定 */}
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1">
+              <input
+                type="checkbox"
+                checked={enableTP}
+                onChange={(e) => setEnableTP(e.target.checked)}
+              />
+              <span className="text-sm text-buy">TP:</span>
+            </label>
+            {enableTP && (
+              <>
+                <select
+                  value={tpType}
+                  onChange={(e) => setTpType(e.target.value as 'price' | 'pips')}
+                  className="px-2 py-1 bg-bg-primary border border-border rounded text-sm"
+                >
+                  <option value="pips">pips</option>
+                  <option value="price">価格</option>
+                </select>
+                {tpType === 'price' ? (
+                  <input
+                    type="number"
+                    value={tpPrice}
+                    onChange={(e) => setTpPrice(e.target.value)}
+                    placeholder={currentPrice.toFixed(3)}
+                    className="w-24 px-2 py-1 bg-bg-primary border border-border rounded text-sm"
+                    step="0.001"
+                  />
+                ) : (
+                  <input
+                    type="number"
+                    value={tpPips}
+                    onChange={(e) => setTpPips(e.target.value)}
+                    placeholder="30"
+                    className="w-20 px-2 py-1 bg-bg-primary border border-border rounded text-sm"
+                    step="1"
+                  />
+                )}
+                {tpType === 'pips' && <span className="text-xs text-text-secondary">pips</span>}
+              </>
+            )}
+          </div>
+
+          <div className="text-xs text-text-secondary">
+            ※ SL/TP: pips値で指定（正負どちらも可、エントリー価格からの差分として計算されます）
+          </div>
+        </div>
       </div>
     </div>
   )
