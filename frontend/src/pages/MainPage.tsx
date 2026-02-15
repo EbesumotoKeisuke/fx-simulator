@@ -291,16 +291,7 @@ function MainPage() {
     setMissingDataWarning(`${timeframeName}のデータがインポートされていません。「データ管理」から${timeframeName}データをインポートしてください。`)
   }, [])
 
-  const formatTime = (date: Date | null) => {
-    if (!date) return '----/--/-- --:--'
-    return date.toLocaleString('ja-JP', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
-  }
+
 
   return (
     <div className="h-screen flex flex-col bg-bg-primary">
@@ -314,34 +305,6 @@ function MainPage() {
         onStart={handleStart}
         onEnd={handleEnd}
       />
-
-      {/* Status Bar */}
-      <div className="px-4 py-2 bg-bg-card border-b border-border text-base text-text-secondary flex items-center gap-4">
-        <span>シミュレーション時刻: {formatTime(currentTime)}</span>
-        <span>|</span>
-        <span>状態: {
-          status === 'running' ? '実行中' :
-          status === 'paused' ? '一時停止' :
-          status === 'stopped' ? '終了' :
-          status === 'created' ? '準備完了' :
-          '未開始'
-        }</span>
-        {status === 'idle' && (
-          <span className="text-yellow-400">
-            ※ 「設定」または「開始」ボタンからシミュレーションを設定してください
-          </span>
-        )}
-        {status === 'stopped' && (
-          <span className="text-yellow-400">
-            ※ 「設定」または「開始」ボタンから新しいシミュレーションを設定してください
-          </span>
-        )}
-        {status === 'created' && (
-          <span className="text-green-400">
-            ※ 「開始」ボタンをクリックしてシミュレーションを開始してください
-          </span>
-        )}
-      </div>
 
       {/* Alert Banner */}
       <AlertBanner />
@@ -403,27 +366,22 @@ function MainPage() {
       </div>
 
       {/* Resizable bottom section (Control Bar + Order Panel + Position & Account) */}
-      <div className="resize-y border-t-2 border-border flex flex-col" style={{ height: '400px', minHeight: '250px', maxHeight: '650px' }}>
-        {/* Control Bar */}
-        <ControlBar
-          currentPrice={currentPrice}
-          onRefresh={handleRefresh}
-          lotQuantity={sharedLotQuantity}
-          lotUnit={sharedLotUnit}
-          onLotQuantityChange={setSharedLotQuantity}
-          onLotUnitChange={setSharedLotUnit}
-        />
-
-        {/* Order Panel */}
-        <OrderPanel
-          currentPrice={currentPrice}
-          account={account}
-          onRefresh={handleRefresh}
-          lotQuantity={sharedLotQuantity}
-          lotUnit={sharedLotUnit}
-          onLotQuantityChange={setSharedLotQuantity}
-          onLotUnitChange={setSharedLotUnit}
-        />
+      <div className="resize-y border-t-2 border-border flex flex-col" style={{ height: '310px', minHeight: '300px', maxHeight: '450px' }}>
+        {/* Control Bar + Order Panel (横並び) */}
+        <div className="flex items-stretch border-b border-border">
+          <ControlBar
+            currentPrice={currentPrice}
+          />
+          <OrderPanel
+            currentPrice={currentPrice}
+            account={account}
+            onRefresh={handleRefresh}
+            lotQuantity={sharedLotQuantity}
+            lotUnit={sharedLotUnit}
+            onLotQuantityChange={setSharedLotQuantity}
+            onLotUnitChange={setSharedLotUnit}
+          />
+        </div>
 
         {/* Position, Pending Orders & Account */}
         <div className="flex-1 grid grid-cols-10 gap-2 p-2 overflow-hidden">

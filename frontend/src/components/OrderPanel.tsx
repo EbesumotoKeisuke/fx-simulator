@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { ordersApi, PendingOrderRequest, AccountInfo } from '../services/api'
 import { useSimulationStore } from '../store/simulationStore'
 import { logger } from '../utils/logger'
@@ -72,6 +72,19 @@ function OrderPanel({
     const totalUnits = quantity * unit
     return totalUnits / 100000
   }
+
+  // 合計通貨数
+  const totalUnits = useMemo(() => {
+    const quantity = parseFloat(lotQuantity) || 0
+    const unit = parseFloat(lotUnit) || 0
+    return quantity * unit
+  }, [lotQuantity, lotUnit])
+
+  // 必要証拠金（レバレッジ25倍）
+  const requiredMargin = useMemo(() => {
+    if (currentPrice <= 0) return 0
+    return (totalUnits * currentPrice) / 25
+  }, [totalUnits, currentPrice])
 
   const handleMarketOrder = async (side: 'buy' | 'sell') => {
     if (!canTrade) {
@@ -198,10 +211,10 @@ function OrderPanel({
   }
 
   return (
-    <div className="bg-bg-card border-t border-border p-3">
+    <div className="bg-bg-card p-3 flex-1 min-w-0">
       <div className="flex flex-col gap-2">
-        {/* 第1行: 注文タイプ、売買方向、ロット数、トリガー価格 */}
-        <div className="flex items-center gap-4">
+        {/* 第1行: 注文タイプ、ロット数、合計通貨・証拠金、トリガー価格、注文ボタン */}
+        <div className="flex items-center gap-4 flex-wrap">
           {/* 注文タイプ */}
           <div className="flex items-center gap-2">
             <label className="text-sm text-text-secondary">注文:</label>
@@ -256,6 +269,14 @@ function OrderPanel({
               <option value="100000">100,000</option>
             </select>
           </div>
+
+          {/* 合計通貨数・証拠金 */}
+          <span className="text-sm text-text-secondary whitespace-nowrap">
+            = {totalUnits.toLocaleString()}通貨
+          </span>
+          <span className="text-sm text-text-secondary whitespace-nowrap">
+            (証拠金: ¥{requiredMargin.toLocaleString(undefined, { maximumFractionDigits: 0 })})
+          </span>
 
           {/* トリガー価格（予約注文のみ） */}
           {orderType !== 'market' && (
@@ -322,6 +343,10 @@ function OrderPanel({
                       onClick={() => {
                         setLotQuantity(String(quantity))
                         setLotUnit('10000')
+                        // SLを有効にしてpips値も連動設定
+                        setEnableSL(true)
+                        setSlType('pips')
+                        setSlPips(String(-preset.slPips))
                       }}
                       className="px-1.5 py-0.5 bg-bg-primary border border-border rounded text-xs hover:bg-border"
                     >

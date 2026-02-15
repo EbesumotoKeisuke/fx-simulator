@@ -264,15 +264,15 @@ function PositionPanel({ refreshTrigger, account, currentPrice }: PositionPanelP
       ) : (
         <div className="flex-1 overflow-hidden flex flex-col">
           {/* 固定テーブルヘッダー */}
-          <table className="w-full text-base text-text-primary table-fixed">
+          <table className="w-full text-xs text-text-primary table-fixed">
             <colgroup>
-              <col className="w-12" />
+              <col className="w-10" />
+              <col className="w-8" />
+              <col className="w-14" />
+              <col className="w-16" />
+              <col className="w-16" />
               <col className="w-20" />
               <col className="w-20" />
-              <col className="w-16" />
-              <col className="w-16" />
-              <col className="w-16" />
-              <col className="w-16" />
               <col className="w-20" />
               <col className="w-20" />
               <col className="w-32" />
@@ -295,15 +295,15 @@ function PositionPanel({ refreshTrigger, account, currentPrice }: PositionPanelP
 
           {/* スクロール可能なテーブルボディ */}
           <div className="flex-1 overflow-auto">
-            <table className="w-full text-base text-text-primary table-fixed">
+            <table className="w-full text-xs text-text-primary table-fixed">
               <colgroup>
-                <col className="w-12" />
+                <col className="w-10" />
+                <col className="w-8" />
+                <col className="w-14" />
+                <col className="w-16" />
+                <col className="w-16" />
                 <col className="w-20" />
                 <col className="w-20" />
-                <col className="w-16" />
-                <col className="w-16" />
-                <col className="w-16" />
-                <col className="w-16" />
                 <col className="w-20" />
                 <col className="w-20" />
                 <col className="w-32" />

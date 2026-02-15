@@ -15,12 +15,22 @@ function Header({ currentTime, status, onDataManagement, onAnalysis, onSettings,
   const [showHelp, setShowHelp] = useState(false)
 
   return (
-    <header className="flex items-center justify-between px-4 py-2 bg-bg-card border-b border-border">
-      <h1 className="text-xl font-bold text-text-strong">FX Trade Simulator</h1>
-      <span className="text-text-primary">
-        {format(currentTime, 'yyyy/MM/dd HH:mm')}
+    <header className="flex items-center px-4 py-2 bg-bg-card border-b border-border gap-4">
+      <h1 className="text-xl font-bold text-text-strong whitespace-nowrap">FX Trade Simulator</h1>
+      <span className="text-sm text-text-secondary whitespace-nowrap">
+        シミュレーション時刻: {format(currentTime, 'yyyy/MM/dd HH:mm')}
       </span>
-      <div className="flex gap-2">
+      <span className="text-sm text-text-secondary">|</span>
+      <span className="text-sm text-text-secondary whitespace-nowrap">
+        状態: {
+          status === 'running' ? '実行中' :
+          status === 'paused' ? '一時停止' :
+          status === 'stopped' ? '終了' :
+          status === 'created' ? '準備完了' :
+          '未開始'
+        }
+      </span>
+      <div className="flex gap-2 ml-auto">
         <button
           onClick={() => setShowHelp(true)}
           className="w-8 h-8 flex items-center justify-center bg-btn-secondary text-text-strong rounded-full text-sm hover:opacity-80"
